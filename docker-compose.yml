@@ -1,0 +1,38 @@
+# Local dependencies for development and tests. The full app (api, worker, frontend) is added in P1.5/P5.
+# Credentials are throwaway local values; override them via a gitignored .env (see .env.example).
+services:
+  postgres:
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-linkforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-linkforge_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-linkforge}
+    ports:
+      # Bound to 127.0.0.1 so the database is not exposed to your network.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # $$ stops compose from substituting; the variables are read inside the container.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7.4
+    # AOF on (ARCHITECTURE §5.1). Memory limits/eviction policy are added with the Redis work in P2.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:

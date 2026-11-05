@@ -45,3 +45,13 @@ Made under the user's delegation ("decide on your own"). Each is reflected in `d
 | D33 | A random code that equals a reserved word (case-insensitive) is rejected and regenerated in the same retry loop | Reserved list includes 7-char words (`healthz`, `metrics`) |
 | D34 | `PATCH expires_at` must also be in the future when non-null. A user with `is_active=false` cannot log in (generic 401). `updated_at` is set by the service on every PATCH. `HEAD /{code}` passes the redirect limiter like `GET` | Fills gaps; keeps the generic-401 rule |
 | D35 | Field limits: link `title` ≤ 200 chars, API key `name` 1–64 chars | PRD gave none |
+
+## P1 decisions (2026-11-05)
+
+| # | Decision | Why |
+|---|---|---|
+| D36 | `TEST_DATABASE_URL` (new env var) points the test suite at a separate DB (`linkforge_test`); tests never touch the dev DB. Compose uses throwaway local credentials as defaults inside `docker-compose.yml` (overridable via a gitignored `.env`) and publishes Postgres/Redis on `127.0.0.1` only. (No `.env.example` file: the project's `Read(./.env.*)` deny rule also blocks writing it, and nothing needs it yet) | Integration tests need a real but isolated DB; ARCH §9.1 had no test setting |
+| D37 | Temporary dev user: one dependency `get_current_user` that ensures a fixed dev user exists; only usable when `ENV != prod`. P2.6 deletes it; a test marked to fail once real auth lands guards against forgetting | P1 needs an owner for links before auth exists |
+| D38 | P1 `/readyz` returns `{"status","postgres"}` only. The `redis` field (D31) is added in P2.1 when a Redis client exists; reporting Redis health before then would be a lie | Contract is additive |
+| D39 | DB connect timeout is a code constant (3 s), not an env var | Avoids inventing config for a readiness detail |
+| D40 | Compose and the test-DB-creation fixture land in P1.1 (not P1.6) because the first real-Postgres test needs them; P1.6 then only adds truncation fixtures and polish | Order of work, not scope |
