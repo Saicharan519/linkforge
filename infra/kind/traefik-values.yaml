@@ -1,0 +1,38 @@
+# Helm values for the Traefik ingress controller on kind (chart traefik/traefik, version pinned
+# in docs/RUNBOOK-kind.md). An Ingress object is only a set of ROUTING RULES; a controller like
+# Traefik is the program that reads them and actually forwards the traffic.
+deployment:
+  replicas: 1
+
+service:
+  # kind has no cloud load balancer, so expose Traefik on a fixed port of the node instead.
+  # 30080 is the port mapped to host port 80 in kind-config.yaml. (EKS uses an ALB instead.)
+  # In this chart the Service type lives under service.spec (a plain "service.type" is ignored and
+  # silently leaves the default, LoadBalancer, which would stay <pending> forever on kind).
+  spec:
+    type: NodePort
+
+ports:
+  web:
+    nodePort: 30080
+  websecure:
+    # No TLS locally: do not expose the HTTPS entrypoint at all.
+    expose:
+      default: false
+
+api:
+  # The Traefik dashboard is not needed and would be one more thing to secure.
+  dashboard: false
+
+ingressRoute:
+  dashboard:
+    enabled: false
+
+# Requests/limits on every container (infra rules). Memory limit = hard cap (OOMKilled above it).
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 192Mi
