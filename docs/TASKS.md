@@ -49,7 +49,7 @@ DevOps pointer: §2, §3.
 
 ## P1S — Walking skeleton (DevOps early; decision D4)
 Goal: a complete CI → GitOps → kind loop for a MINIMAL app (links + redirect on Postgres, no Redis/auth/frontend yet), so infra problems surface before features pile up. Everything here is later extended, not thrown away (the raw manifests are the only throwaway).
-- ☐ P1S.1 Backend Dockerfile (multi-stage, non-root, healthcheck) + `.dockerignore`; Compose with postgres, one-shot migrate, api. *Verify:* `docker compose up --build` → `curl -i localhost:8000/<code>` = 302; `id` is non-root; note image size.
+- ☑ P1S.1 Backend Dockerfile (multi-stage, non-root, healthcheck) + `.dockerignore`; Compose with postgres, one-shot migrate, api. *Verify:* `docker compose up --build` → `curl -i localhost:8000/<code>` = 302; `id` is non-root; note image size.
 - ☐ P1S.2 Placeholder frontend: a static nginx-unprivileged page (the real SPA comes in P4/P5) so the two-host ingress can be exercised.
 - ☐ P1S.3 CI: extend `ci.yml` to build the image; new `build-push.yml` on main → build → Trivy → push to **public GHCR** with `GITHUB_TOKEN` (`:<short-sha>`, no AWS yet) → commit the new tag to `linkforge-gitops` (token scoped to that one repo).
 - ☐ P1S.4 kind cluster + Traefik + metrics-server; raw manifests first (learn the objects), then the minimal Helm chart in `linkforge-gitops` with `envs/kind/values.yaml` (postgres StatefulSet, migration Job, api, placeholder frontend, Ingress for `app.localtest.me` and `go.localtest.me`).

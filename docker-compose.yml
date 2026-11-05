@@ -1,6 +1,46 @@
-# Local dependencies for development and tests. The full app (api, worker, frontend) is added in P1.5/P5.
-# Credentials are throwaway local values; override them via a gitignored .env (see .env.example).
+# Local stack for development and tests.
+#   docker compose up -d postgres redis     -> only the dependencies (run the app yourself with uvicorn)
+#   docker compose up --build api           -> postgres + one-shot migration + the API in a container
+# The worker and the real frontend are added in P3/P5. Credentials are throwaway local values;
+# override them with a gitignored .env file if you like.
+
+# Shared by `migrate` and `api`: the SAME image, built once from ./backend. YAML anchors (&name /
+# <<: *name) are just copy-paste avoidance, Compose has no special meaning for them.
+x-backend: &backend
+  build: ./backend
+  image: linkforge-api:dev
+  environment:
+    # Inside the compose network the database is reached by its SERVICE NAME ("postgres"), not
+    # localhost: Compose gives every service a DNS name on a private network.
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-linkforge}:${POSTGRES_PASSWORD:-linkforge_dev}@postgres:5432/${POSTGRES_DB:-linkforge}
+    ENV: dev
+    SHORT_URL_BASE: http://localhost:8000
+
 services:
+  # Runs the Alembic migrations ONCE and exits. The API waits for it to finish successfully, which
+  # is the local twin of the Kubernetes migration Job (ARCHITECTURE §11).
+  migrate:
+    <<: *backend
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    healthcheck:
+      disable: true # a short-lived job has nothing to health-check
+
+  api:
+    <<: *backend
+    ports:
+      # 127.0.0.1 only: reachable from this machine, not from your network.
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   postgres:
     image: postgres:16.4
     environment:

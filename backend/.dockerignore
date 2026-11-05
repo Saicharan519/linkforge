@@ -1,0 +1,28 @@
+# Everything listed here is excluded from the BUILD CONTEXT: the files Docker sends to the daemon.
+# Smaller context = faster builds, and nothing secret or irrelevant can leak into an image layer.
+
+# Local environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets and local config: must never end up in an image
+.env
+.env.*
+*.pem
+
+# Not needed at runtime
+tests/
+requirements-dev.txt
+pyproject.toml
+Dockerfile
+.dockerignore
+CLAUDE.md
+*.md
+.git
+.gitignore
