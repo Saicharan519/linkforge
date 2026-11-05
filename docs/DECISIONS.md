@@ -26,3 +26,22 @@ Short records of decisions made during design review (2026-11-05). Each says WHA
 | D20 | Shell = WSL2 (Ubuntu, already installed with Docker); repo lives in the WSL filesystem at `~/linkforge`, outside OneDrive (user confirmed); `.gitattributes` forces LF; `.wslconfig` caps WSL at 8 GB | Laptop has ~16 GB with Windows already using ~12 GB; OneDrive breaks `.git`/`node_modules`/`.terraform` | TASKS P0, DEVOPS_GUIDE |
 | D21 | Secrets stay Sealed Secrets. External Secrets / Secrets Manager remain "production would use" only | Stack is locked; avoids scope creep | unchanged |
 | D22 | `.claude/settings.json` deny rules are a guardrail, not a boundary. The real control: cloud credentials never exist in a shell Claude runs in | Pattern denies are bypassable (`--context`, `-chdir`, `cat .env`) | CLAUDE.md, SECURITY.md |
+
+## P0.5 decisions (2026-11-05) — gaps the specs were silent on
+Made under the user's delegation ("decide on your own"). Each is reflected in `docs/openapi.skeleton.yaml`. Challenge any of them before P1/P2 uses it.
+
+| # | Decision | Why |
+|---|---|---|
+| D23 | Status codes and bodies: `register` 201 → User; `login` 200 → User and sets `lf_session` + `lf_csrf`; `logout` 204; `change-password` 204; `DELETE` link / api-key 204; `POST /links` 201 → Link; `POST /api-keys` 201 → ApiKeyCreated (plaintext `key` shown once) | ARCH §4 gave only some codes |
+| D24 | `User` = `{id, email, created_at}` | Minimal; nothing sensitive |
+| D25 | The `Origin` check also applies to unauthenticated `POST /auth/register` and `/auth/login` (login-CSRF defence). No CSRF token is needed there because no `lf_csrf` cookie exists yet | A cross-site form could otherwise log a victim into the attacker's account |
+| D26 | If an `X-API-Key` header is present it is used and cookies are ignored (no CSRF check). An invalid key is 401 even if a valid session cookie is also sent | Browsers cannot set that header cross-site (we enable no CORS), so no CSRF bypass; precedence must be deterministic |
+| D27 | Analytics `range` accepts `7d|30d|90d`, default `30d`, anything else → 422. `/analytics/overview` accepts the same, default `30d` | PRD fixes 30d for the overview but the shared enum is additive-safe |
+| D28 | Analytics item shapes: `referrers[{host, clicks}]` (top 10; empty referrer reported as host `(direct)`), `devices[{device_type, clicks}]`, `browsers[{browser, clicks}]` (top 10), overview `top_links[{id, code, title, clicks}]` (top 5 by clicks in range) | ARCH §4 listed only the array names |
+| D29 | `device_type` ∈ `desktop|mobile|tablet|other` | Needed for the device split chart |
+| D30 | Machine error codes in `{"error":{"code","message","details"}}`: `validation_error`(422), `unauthorized`(401), `invalid_credentials`(401), `csrf_failed`(403, token or Origin), `not_found`(404, and 404 on the public host), `gone`(410), `alias_taken`(409), `email_taken`(409), `rate_limited`(429, with `Retry-After`), `unavailable`(503), `internal_error`(500). For 422, `details` = list of `{field, message}` | The frontend renders field errors from the API's 422 body (frontend/CLAUDE.md) |
+| D31 | `GET /healthz` → 200 `{"status":"ok"}`. `GET /readyz` → 200 `{"status":"ok","postgres":"ok","redis":"ok|degraded"}`; Postgres down → 503 `{"status":"unavailable","postgres":"down","redis":"..."}` | backend/CLAUDE.md only said `{"redis":"degraded"}` |
+| D32 | A 410 (expired) response is NOT cached in Redis; each hit reads Postgres. Accepted for v1 (low volume); revisit only if k6 shows it matters | ARCH §2.1 caches only 404 (neg) and active links; adding a `gone:` key would be new design |
+| D33 | A random code that equals a reserved word (case-insensitive) is rejected and regenerated in the same retry loop | Reserved list includes 7-char words (`healthz`, `metrics`) |
+| D34 | `PATCH expires_at` must also be in the future when non-null. A user with `is_active=false` cannot log in (generic 401). `updated_at` is set by the service on every PATCH. `HEAD /{code}` passes the redirect limiter like `GET` | Fills gaps; keeps the generic-401 rule |
+| D35 | Field limits: link `title` ≤ 200 chars, API key `name` 1–64 chars | PRD gave none |
