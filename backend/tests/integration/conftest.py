@@ -8,19 +8,24 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import AsyncIterator, Iterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import asyncpg
 import pytest
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import CurrentUser, get_current_user, get_now
 from app.config import Settings
 from app.db import create_engine, create_sessionmaker
 from app.main import create_app
+from app.models import User
 from tests.conftest import TEST_DATABASE_URL
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -94,10 +99,47 @@ async def clean_tables(migrated_database: None) -> None:
 @asynccontextmanager
 async def client_for(settings: Settings) -> AsyncIterator[AsyncClient]:
     """An HTTP client talking to a real app instance (lifespan included) with the given settings."""
+    async with running_app(settings) as (_, client):
+        yield client
+
+
+@asynccontextmanager
+async def running_app(
+    settings: Settings, *, overrides: dict[Callable[..., Any], Callable[..., Any]] | None = None
+) -> AsyncIterator[tuple[FastAPI, AsyncClient]]:
+    """A real app instance plus an HTTP client for it.
+
+    `overrides` replaces FastAPI dependencies (identity, clock) for this app instance only.
+    raise_app_exceptions=False makes a crash arrive as the HTTP 500 a real client would see.
+    """
     app = create_app(settings)
+    app.dependency_overrides.update(overrides or {})
     async with app.router.lifespan_context(app):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            yield client
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            yield app, client
+
+
+ApiAs = Callable[..., AbstractAsyncContextManager[tuple[FastAPI, AsyncClient]]]
+
+
+@pytest.fixture
+def api_as() -> ApiAs:
+    """`async with api_as(user, now=..., settings=...) as (app, client)`: the API, acting as `user`.
+
+    This stands in for real authentication, which arrives in P2.
+    """
+
+    def factory(
+        user: User, *, now: datetime | None = None, settings: Settings | None = None
+    ) -> AbstractAsyncContextManager[tuple[FastAPI, AsyncClient]]:
+        who = CurrentUser(id=user.id, email=user.email)
+        overrides: dict[Callable[..., Any], Callable[..., Any]] = {get_current_user: lambda: who}
+        if now is not None:
+            overrides[get_now] = lambda: now
+        return running_app(settings or Settings(), overrides=overrides)
+
+    return factory
 
 
 @pytest.fixture

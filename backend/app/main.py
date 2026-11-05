@@ -6,8 +6,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import health
+from app.api import health, links
 from app.config import Settings, get_settings
+from app.core.errors import install_error_handlers
 from app.db import create_engine, create_sessionmaker
 
 
@@ -39,7 +40,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
 
+    install_error_handlers(app)
     app.include_router(health.router)
+    app.include_router(links.router)
     # NOTE: the redirect router `GET /{code}` must be included LAST (added in P1.5), otherwise it
     # would shadow every other root-level route.
     return app

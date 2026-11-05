@@ -435,6 +435,7 @@ components:
                 - invalid_credentials
                 - csrf_failed
                 - not_found
+                - method_not_allowed
                 - gone
                 - alias_taken
                 - email_taken

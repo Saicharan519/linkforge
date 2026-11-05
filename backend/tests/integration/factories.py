@@ -16,7 +16,8 @@ async def make_user(db: AsyncSession, email: str = "user@example.com") -> User:
 
 
 async def make_link(db: AsyncSession, user: User, code: str = "abc1234", **fields: object) -> Link:
-    link = Link(user_id=user.id, code=code, destination_url="https://example.com/page", **fields)
+    values = {"destination_url": "https://example.com/page", **fields}  # tests may override
+    link = Link(user_id=user.id, code=code, **values)
     db.add(link)
     await db.commit()
     return link
