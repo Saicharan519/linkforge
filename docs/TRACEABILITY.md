@@ -121,7 +121,7 @@ Test names are the PLANNED names; the implementing task may adjust wording but m
 | Constraints enforced: unique email, event_id, FK cascade | P1.2 | `test_unique_email_ci`, `test_event_id_unique`, `test_fk_cascade_delete` |
 | Ruff clean, tsc strict, tests on real Postgres/Redis in CI, ≥80% backend service coverage | P1.7, P4.7 | CI badge + coverage report |
 | Dependency + image scanning gated in CI | P1.7, P6.1 | green Trivy job; Trivy-fails-on-vulnerable-base demo |
-| Non-root containers, security headers on the SPA | P1.5-skeleton, P5 | `docker compose exec api id`; header check on :8080 |
+| Non-root containers, security headers on the SPA | P1S, P5 | `docker compose exec api id`; header check on :8080 |
 | DB TLS verify-full on RDS (D14) | P9 | connection test on EKS |
 | Degradation matrix ARCH §8 demonstrated | P8b, P8, P10 | drills recorded in `RESULTS.md` / `VERIFICATION.md` |
 | Cost: destroy verified | P10 | console checklist, Cost Explorer next day |
@@ -130,6 +130,6 @@ Test names are the PLANNED names; the implementing task may adjust wording but m
 | Item | Phase |
 |---|---|
 | 1. [M] features work via `docker compose up` and on kind via Argo CD | P5, P7D |
-| 2. CI green on main; scanned image to ECR (SHA tag); gitops repo auto-updated | P1.5, P6 |
+| 2. CI green on main; scanned image to ECR (SHA tag); gitops repo auto-updated | P1S, P6 |
 | 3. Deployed once on EKS from a clean `terraform apply`, load tested, drills done, destroyed and verified | P9, P10 |
 | 4. README with diagram, screenshots, real k6 numbers, demo video, "what breaks when Redis dies" | P11 |

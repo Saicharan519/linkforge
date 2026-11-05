@@ -8,8 +8,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-linkforge_dev}
       POSTGRES_DB: ${POSTGRES_DB:-linkforge}
     ports:
-      # Bound to 127.0.0.1 so the database is not exposed to your network.
-      - "127.0.0.1:5432:5432"
+      # Bound to 127.0.0.1 so the database is not exposed to your network. The host port can be
+      # changed (POSTGRES_PORT) if something else on your machine already uses 5432.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +25,8 @@ services:
     # AOF on (ARCHITECTURE §5.1). Memory limits/eviction policy are added with the Redis work in P2.
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     ports:
-      - "127.0.0.1:6379:6379"
+      # REDIS_PORT: e.g. when a Redis installed on the machine itself already owns 6379.
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:

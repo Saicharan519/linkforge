@@ -26,7 +26,7 @@ Separate repo `linkforge-gitops`: `charts/linkforge/`, `envs/kind/values.yaml`, 
 - RDS (demo): private subnets, `backup_retention_period = 1`, `skip_final_snapshot = true`, `deletion_protection = false` — with a comment saying why (disposable) and what production would do.
 - Pin everything: provider versions (`~>`), module versions, Docker base tags (no `latest`), GitHub Actions by full commit SHA, Helm chart versions, Argo CD version.
 - Docker: multi-stage, non-root, `.dockerignore`, `HEALTHCHECK` for compose, no secrets in layers. One backend image, API and worker via different `command`.
-- Image tag = short git SHA. Never deploy `latest`. Registries (D5): CI pushes to **public GHCR** with `GITHUB_TOKEN` from P1.5 (kind pulls it; `kind load` only for local iteration); P6 adds an OIDC push to **ECR** (immutable tags) which EKS pulls natively.
+- Image tag = short git SHA. Never deploy `latest`. Registries (D5): CI pushes to **public GHCR** with `GITHUB_TOKEN` from P1S (kind pulls it; `kind load` only for local iteration); P6 adds an OIDC push to **ECR** (immutable tags) which EKS pulls natively.
 - Also in CI/repo (D19): Dependabot (actions, pip, npm, docker, terraform), Checkov on `infra/terraform`, gitleaks pre-commit. k3s on EC2 is a documented fallback only (D2): do not build it unless EKS is blocked.
 - CI gates: ruff + pytest (service containers) + frontend lint/typecheck/test/build; then Trivy `fs` and `image` with `--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1`. Exceptions only via `.trivyignore` with justification + expiry date.
 - CD = Argo CD only. CI never runs `kubectl`/`helm`; it builds, scans, pushes, and commits the new tag to `linkforge-gitops` (fine-grained token scoped to that one repo).

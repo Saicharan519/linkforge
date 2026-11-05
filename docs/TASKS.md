@@ -10,7 +10,7 @@
 7. If something fails, paste the exact error, not a paraphrase.
 
 Legend: ☐ todo · ☑ done. "Done when" is the acceptance test — not "code written".
-Phase order: P0 → P0.5 → P1 → **P1.5 (walking skeleton)** → P2 → P3 → P4 → P5 → P6 → P7A → P7B → P7C → P7D → P8 → P8b → P9 → P10 → P11.
+Phase order: P0 → P0.5 → P1 → **P1S (walking skeleton)** → P2 → P3 → P4 → P5 → P6 → P7A → P7B → P7C → P7D → P8 → P8b → P9 → P10 → P11.
 Working mode (decision D1): Claude writes app code + tests; for DevOps phases Claude writes commented files, explains what/why/how it works, gives the exact commands + expected output + a "break it" exercise; the human runs them and explains the phase back before moving on. Decisions are logged in `docs/DECISIONS.md`.
 
 ---
@@ -35,28 +35,28 @@ Prompt:
 
 ## P1 — Backend core + CI basics
 Goal: link CRUD + redirect on Postgres, tests, CI green from day 1.
-- ☐ P1.1 Project skeleton, config (`pydantic-settings`), async DB, `/healthz` + `/readyz`. *Test:* app boots; readyz fails when DB unreachable.
-- ☐ P1.2 Models + Alembic initial migration (all tables, constraints, indexes per ARCH §3). *Test:* upgrade on empty DB works; constraints enforced (unique email, event_id, FK cascade).
-- ☐ P1.3 `core/urls.py` validation + `core/shortcode.py`. *Test:* table-driven valid/invalid URLs, reserved/alias rules, collision retry.
-- ☐ P1.4 Link CRUD with a TEMPORARY dev user (removed in P2), PATCH null/omitted semantics, status field, pagination limits. *Test:* each rule from PRD F2.
-- ☐ P1.5 Redirect on Postgres only (302/404/410, precedence). *Test:* each status.
-- ☐ P1.6 Compose with postgres + redis; pytest fixtures on a separate test DB.
-- ☐ P1.7 GitHub Actions `ci.yml`: backend job (service containers) + ruff + pytest; add dependency audit (`pip-audit`) and secret scan (`gitleaks`) as non-blocking first.
+- ☑ P1.1 Project skeleton, config (`pydantic-settings`), async DB, `/healthz` + `/readyz`. *Test:* app boots; readyz fails when DB unreachable.
+- ☑ P1.2 Models + Alembic initial migration (all tables, constraints, indexes per ARCH §3). *Test:* upgrade on empty DB works; constraints enforced (unique email, event_id, FK cascade).
+- ☑ P1.3 `core/urls.py` validation + `core/shortcode.py`. *Test:* table-driven valid/invalid URLs, reserved/alias rules, collision retry.
+- ☑ P1.4 Link CRUD with a TEMPORARY dev user (removed in P2), PATCH null/omitted semantics, status field, pagination limits. *Test:* each rule from PRD F2.
+- ☑ P1.5 Redirect on Postgres only (302/404/410, precedence). *Test:* each status.
+- ☑ P1.6 Compose with postgres + redis; pytest fixtures on a separate test DB.
+- ☑ P1.7 GitHub Actions `ci.yml`: backend job (service containers) + ruff + pytest; add dependency audit (`pip-audit`) and secret scan (`gitleaks`) as non-blocking first.
 Done when: pytest green locally and in Actions; `curl -i localhost:8000/<code>` returns 302; migration works on an empty DB.
 Prompt:
 > P1 only. Plan P1.1–P1.7 (one commit each, tests named). Wait for approval.
 DevOps pointer: §2, §3.
 
-## P1.5 — Walking skeleton (DevOps early; decision D4)
+## P1S — Walking skeleton (DevOps early; decision D4)
 Goal: a complete CI → GitOps → kind loop for a MINIMAL app (links + redirect on Postgres, no Redis/auth/frontend yet), so infra problems surface before features pile up. Everything here is later extended, not thrown away (the raw manifests are the only throwaway).
-- ☐ P1.5.1 Backend Dockerfile (multi-stage, non-root, healthcheck) + `.dockerignore`; Compose with postgres, one-shot migrate, api. *Verify:* `docker compose up --build` → `curl -i localhost:8000/<code>` = 302; `id` is non-root; note image size.
-- ☐ P1.5.2 Placeholder frontend: a static nginx-unprivileged page (the real SPA comes in P4/P5) so the two-host ingress can be exercised.
-- ☐ P1.5.3 CI: extend `ci.yml` to build the image; new `build-push.yml` on main → build → Trivy → push to **public GHCR** with `GITHUB_TOKEN` (`:<short-sha>`, no AWS yet) → commit the new tag to `linkforge-gitops` (token scoped to that one repo).
-- ☐ P1.5.4 kind cluster + Traefik + metrics-server; raw manifests first (learn the objects), then the minimal Helm chart in `linkforge-gitops` with `envs/kind/values.yaml` (postgres StatefulSet, migration Job, api, placeholder frontend, Ingress for `app.localtest.me` and `go.localtest.me`).
-- ☐ P1.5.5 Argo CD (pinned) + one `linkforge` Application (automated sync, prune, selfHeal). Secrets by hand for now.
+- ☐ P1S.1 Backend Dockerfile (multi-stage, non-root, healthcheck) + `.dockerignore`; Compose with postgres, one-shot migrate, api. *Verify:* `docker compose up --build` → `curl -i localhost:8000/<code>` = 302; `id` is non-root; note image size.
+- ☐ P1S.2 Placeholder frontend: a static nginx-unprivileged page (the real SPA comes in P4/P5) so the two-host ingress can be exercised.
+- ☐ P1S.3 CI: extend `ci.yml` to build the image; new `build-push.yml` on main → build → Trivy → push to **public GHCR** with `GITHUB_TOKEN` (`:<short-sha>`, no AWS yet) → commit the new tag to `linkforge-gitops` (token scoped to that one repo).
+- ☐ P1S.4 kind cluster + Traefik + metrics-server; raw manifests first (learn the objects), then the minimal Helm chart in `linkforge-gitops` with `envs/kind/values.yaml` (postgres StatefulSet, migration Job, api, placeholder frontend, Ingress for `app.localtest.me` and `go.localtest.me`).
+- ☐ P1S.5 Argo CD (pinned) + one `linkforge` Application (automated sync, prune, selfHeal). Secrets by hand for now.
 Done when: merge to main → CI builds/scans/pushes to GHCR → gitops tag bumps → Argo rolls it out on kind with no manual step; `go.localtest.me/<code>` redirects; `kubectl delete pod` heals; a bad tag leaves old pods serving and `git revert` fixes it.
 Prompt:
-> P1.5 only. Plan P1.5.1–P1.5.5. For each DevOps step explain what/why/how it works, give the exact commands and expected output, and a "break it" exercise. I run the commands. Wait for approval.
+> P1S only. Plan P1S.1–P1S.5. For each DevOps step explain what/why/how it works, give the exact commands and expected output, and a "break it" exercise. I run the commands. Wait for approval.
 DevOps pointer: §2, §3, §7, §8, §9.
 
 ## P2 — Redis cache, rate limits, auth sessions, API keys
@@ -93,7 +93,7 @@ Prompt:
 > P4 only. Read frontend/CLAUDE.md and use the frontend-design skill: this must look genuinely good (portfolio piece). Plan the design system + pages/components/hooks first; do not invent endpoints outside ARCHITECTURE §4. Wait for approval.
 DevOps pointer: none.
 
-## P5 — Containers + Compose (full stack; backend Dockerfile and basic compose already exist from P1.5)
+## P5 — Containers + Compose (full stack; backend Dockerfile and basic compose already exist from P1S)
 - ☐ P5.1 Extend the backend image/compose with worker + redis (AOF) and re-check size/non-root. ☐ P5.2 Real frontend Dockerfile (nginx-unprivileged, `nginx.conf` proxy, security headers). ☐ P5.3 `.dockerignore`s. ☐ P5.4 Compose: postgres, redis (AOF), one-shot migrate, api, worker, frontend :8080; healthchecks.
 Done when: `docker compose up --build` from a clean clone gives a working app on :8080 including analytics; `docker compose exec api id` is non-root; image sizes noted.
 Prompt:
@@ -101,7 +101,7 @@ Prompt:
 DevOps pointer: §2 — run `docker history` and `trivy image` yourself.
 
 ## P6 — CI hardening + Terraform foundations + ECR push
-- ☐ P6.1 Trivy `fs` + `image` gates; docker build in CI; `.trivyignore` policy. ☐ P6.2 Terraform `bootstrap/` (state bucket). ☐ P6.3 `foundation/` (GitHub OIDC provider + role, ECR repos immutable + lifecycle). ☐ P6.4 Extend `build-push.yml` (it already pushes to GHCR since P1.5): add OIDC → ECR push of the same `:<short-sha>` image. kind keeps pulling GHCR, EKS pulls ECR (`envs/eks` points at ECR). Add Dependabot, Checkov on `infra/terraform`, gitleaks pre-commit (D19). Actions pinned by SHA. ☐ P6.5 Turn on branch protection with required checks.
+- ☐ P6.1 Trivy `fs` + `image` gates; docker build in CI; `.trivyignore` policy. ☐ P6.2 Terraform `bootstrap/` (state bucket). ☐ P6.3 `foundation/` (GitHub OIDC provider + role, ECR repos immutable + lifecycle). ☐ P6.4 Extend `build-push.yml` (it already pushes to GHCR since P1S): add OIDC → ECR push of the same `:<short-sha>` image. kind keeps pulling GHCR, EKS pulls ECR (`envs/eks` points at ECR). Add Dependabot, Checkov on `infra/terraform`, gitleaks pre-commit (D19). Actions pinned by SHA. ☐ P6.5 Turn on branch protection with required checks.
 Done when: merge to main yields an ECR image tagged with the SHA; a deliberately vulnerable base (test branch) fails Trivy; no AWS keys in GitHub secrets (only the gitops token); `terraform plan` shows no changes.
 Prompt:
 > P6 only. Write Terraform (bootstrap, foundation) and the build-push workflow per infra/CLAUDE.md. Do NOT run apply — give me exact commands. Plan first.
@@ -116,7 +116,7 @@ Prompt:
 DevOps pointer: §7.
 
 ## P7B — Helm chart (in `linkforge-gitops`)
-- ☐ P7B.1 Convert raw manifests to `charts/linkforge` with values (image repo/tag, ingress className, `postgres.enabled`, hosts, resources, `PUBLIC_REDIRECT_HOST`, `TRUSTED_PROXY_COUNT`). ☐ P7B.2 Add HPA, PDB, ServiceMonitors (named `metrics` ports), securityContext. ☐ P7B.3 `envs/kind/values.yaml` (the EKS file `envs/eks/values.yaml` is written in P9; never share one file, D6). Note: P1.5 already created a minimal chart; P7A/P7B EXTEND it to the full app (Redis, worker, frontend, HPA, PDB, ServiceMonitors).
+- ☐ P7B.1 Convert raw manifests to `charts/linkforge` with values (image repo/tag, ingress className, `postgres.enabled`, hosts, resources, `PUBLIC_REDIRECT_HOST`, `TRUSTED_PROXY_COUNT`). ☐ P7B.2 Add HPA, PDB, ServiceMonitors (named `metrics` ports), securityContext. ☐ P7B.3 `envs/kind/values.yaml` (the EKS file `envs/eks/values.yaml` is written in P9; never share one file, D6). Note: P1S already created a minimal chart; P7A/P7B EXTEND it to the full app (Redis, worker, frontend, HPA, PDB, ServiceMonitors).
 Done when: `helm lint` clean; `helm template` output reviewed by you; `helm upgrade --install` on kind works; switching `ingress.className` renders correctly; `kubectl top pods` fills HPA metrics.
 Prompt:
 > P7B only, in linkforge-gitops. Convert the raw manifests into a Helm chart. Show me `helm template` output for review. Plan first.
@@ -175,3 +175,4 @@ Done when: a stranger can clone, run `docker compose up`, and see the app in < 5
 |---|---|---|---|---|
 | 2026-11-05 | P0 (partial) | Repo moved to `~/linkforge` (WSL), first commit made; Python 3.12.3, Docker 29.8.2, git present; pip/venv/make/unzip installed after switching apt to https (plain-HTTP .deb downloads were 403 on the user's network) | User ran the commands; verified from WSL: `docker version`, `git log`, `python3 -m venv`, `pip3 --version`, `make --version`. NOT done yet: GitHub push, kind/helm/terraform/aws/k6/kubeseal/trivy/node installs (deferred to the phases that need them), AWS budget credit-handling check, Identity Center decision | Push to GitHub (user), then P1 |
 | 2026-11-05 | P0.5 | Wrote `docs/openapi.skeleton.yaml` (14 paths, 18 schemas), `docs/TRACEABILITY.md` (PRD → task → planned tests), and decisions D23–D35 in `docs/DECISIONS.md` for gaps the specs were silent on | Validated the OpenAPI file with `openapi-spec-validator` in a temp venv (valid 3.1.0); read all specs end to end. NOT verified: that the contract matches real code (nothing implemented yet); test names are plans, not existing tests; nothing committed | User reviews D23–D35 and the contract, then commit; start P1 |
+| 2026-11-05 | P1 (P1.1–P1.7) | Backend core: FastAPI app + env-only config + health probes; 5 models + hand-written async Alembic migration; URL/alias/short-code validation; link CRUD with temporary dev user (D37); GET/HEAD `/{code}` redirect on Postgres; compose (Postgres 16.4 + Redis 7.4 AOF, ports overridable); `ci.yml` (backend job with service containers, non-blocking pip-audit and gitleaks, actions pinned by SHA). Decisions D36–D46. Renamed the walking-skeleton phase P1.5 -> **P1S** (clashed with the P1.5 redirect task) | Ran locally in WSL: `ruff check`, `ruff format --check`, `pytest -q` = 225 passed (real Postgres); mutation checks on ownership, expiry boundary, PATCH semantics, redirect precedence/302/503; live curl incl. Postgres stop/start; `alembic check`; `actionlint` on ci.yml (clean); the CI backend job rehearsed from a clean `git archive` checkout in a fresh venv (225 passed); `pip-audit` (no known vulnerabilities); pinned gitleaks over history (no leaks). NOT verified: the workflow on GitHub itself (needs `git push`), Redis (no code uses it yet), a hung (not refused) Postgres, latency, the OpenAPI contract vs generated spec | `git push`, watch Actions; then P1S (walking skeleton) |

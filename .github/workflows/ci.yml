@@ -1,0 +1,130 @@
+# Continuous integration: nothing is merged unless lint + tests pass.
+# This workflow only reads the repo and builds nothing publishable; images come later (P1.5 skeleton
+# phase adds build-push.yml). See docs/DEVOPS_GUIDE.md §3.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege: the automatic GITHUB_TOKEN may only read the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch/PR makes the older, now-pointless run stop.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Third-party actions are pinned by FULL COMMIT SHA, not by tag: a tag can be moved to different
+# code later, a commit SHA cannot. The version stays in the comment so humans can read it.
+# (Dependabot will bump these in P6.)
+jobs:
+  backend:
+    name: backend (ruff + pytest)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    # Real Postgres and Redis next to the job, exactly like local docker compose. No mocks.
+    services:
+      postgres:
+        image: postgres:16.4
+        env:
+          POSTGRES_USER: linkforge
+          # Throwaway value: this database exists only for the duration of this job.
+          POSTGRES_PASSWORD: linkforge_dev
+          POSTGRES_DB: linkforge
+        ports: ["5432:5432"]
+        # The job waits until the database reports healthy before the steps start.
+        options: >-
+          --health-cmd "pg_isready -U linkforge -d linkforge"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7.4
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # The test suite creates this database itself if it is missing (decision D36).
+      TEST_DATABASE_URL: postgresql+asyncpg://linkforge:linkforge_dev@localhost:5432/linkforge_test
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Later steps never push, so do not leave the token in .git/config.
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install dependencies (exact pinned versions)
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Format check
+        run: ruff format --check .
+
+      - name: Tests (real Postgres and Redis)
+        run: pytest -q
+
+  # ADVISORY for now (continue-on-error): a finding shows up in the run but does not block merges.
+  # It becomes blocking in P6 together with the Trivy gates and branch protection.
+  dependency-audit:
+    name: dependency audit (pip-audit, non-blocking)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Audit pinned dependencies against known vulnerabilities
+        run: |
+          pip install pip-audit==2.10.1
+          pip-audit -r backend/requirements.txt -r backend/requirements-dev.txt
+
+  secret-scan:
+    name: secret scan (gitleaks, non-blocking)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the whole history: a secret removed in a later commit is still leaked
+          persist-credentials: false
+      # We run the gitleaks binary directly instead of its GitHub Action: the Action ships under a
+      # custom licence and phones a licence server, the binary is MIT. A pinned version plus a
+      # SHA-256 check means a swapped release asset cannot run in our pipeline.
+      - name: Install gitleaks (pinned version, checksum verified)
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          curl -sSfL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum --check --strict
+          tar -xzf gitleaks.tar.gz gitleaks
+      - name: Scan the git history for secrets
+        run: ./gitleaks git --redact --verbose --no-banner .
