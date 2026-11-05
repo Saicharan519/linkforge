@@ -1,7 +1,7 @@
 # Local stack for development and tests.
 #   docker compose up -d postgres redis     -> only the dependencies (run the app yourself with uvicorn)
 #   docker compose up --build api           -> postgres + one-shot migration + the API in a container
-# The worker and the real frontend are added in P3/P5. Credentials are throwaway local values;
+# The worker is added in P3; the frontend here is a placeholder page until P4/P5. Credentials are throwaway local values;
 # override them with a gitignored .env file if you like.
 
 # Shared by `migrate` and `api`: the SAME image, built once from ./backend. YAML anchors (&name /
@@ -39,6 +39,14 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Placeholder static page (P1S.2); becomes the real SPA in P4/P5.
+  frontend:
+    build: ./frontend
+    image: linkforge-frontend:dev
+    ports:
+      - "127.0.0.1:8080:8080"
     restart: unless-stopped
 
   postgres:
