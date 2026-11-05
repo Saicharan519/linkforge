@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # OpenAPI docs are served at /api/docs only when this is true (dev only).
     enable_docs: bool = False
 
+    # Public base of short links (e.g. https://go.example.com). Used to build `short_url` and to
+    # refuse destinations that point back at our own short domain (redirect loops).
+    short_url_base: str = "http://localhost:8000"
+
 
 @lru_cache
 def get_settings() -> Settings:
