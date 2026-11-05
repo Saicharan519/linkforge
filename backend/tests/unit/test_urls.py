@@ -102,3 +102,21 @@ def test_error_messages_are_user_safe() -> None:
     with pytest.raises(InvalidUrl) as exc:
         validate_destination_url("javascript:alert(1)", short_url_base=PROD_BASE)
     assert str(exc.value) == "only http and https URLs are allowed"
+
+
+@pytest.mark.parametrize(
+    ("stored", "location"),
+    [
+        ("https://example.com/a?b=1#c", "https://example.com/a?b=1#c"),  # ASCII: untouched
+        ("HTTP://Example.COM/Path", "HTTP://Example.COM/Path"),  # ASCII: not even re-cased
+        ("https://bücher.example/straße", "https://xn--bcher-kva.example/straße"),
+        ("https://bücher.example:8443/x?q=é#ü", "https://xn--bcher-kva.example:8443/x?q=é#ü"),
+        ("https://example.com/é", "https://example.com/é"),  # host already ASCII: host untouched
+        ("http://[::1]:8080/é", "http://[::1]:8080/é"),  # IPv6 keeps its brackets
+    ],
+)
+def test_location_for(stored: str, location: str) -> None:
+    # Only the HOST is converted here; non-ASCII path/query is percent-encoded by the response.
+    from app.core.urls import location_for
+
+    assert location_for(stored) == location

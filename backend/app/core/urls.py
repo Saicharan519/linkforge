@@ -10,7 +10,7 @@ The URL is validated, never rewritten: the caller stores exactly what the user t
 
 import ipaddress
 import re
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 MAX_URL_LENGTH = 2048
 ALLOWED_SCHEMES = frozenset({"http", "https"})
@@ -67,6 +67,27 @@ def _own_origin(short_url_base: str) -> tuple[str, int | None]:
     if port == _DEFAULT_PORTS.get(base.scheme):
         port = None
     return _normalise_host(base.hostname), port
+
+
+def location_for(url: str) -> str:
+    """The stored URL as a value that is safe to put in a `Location` header.
+
+    HTTP headers are ASCII. An internationalised host such as "bücher.example" must be sent in its
+    punycode form ("xn--bcher-kva.example"); percent-encoding it would point at a different host.
+    (Non-ASCII characters in the path/query are percent-encoded by the response class.)
+    A plain ASCII URL is returned untouched.
+    """
+    if url.isascii():
+        return url
+    parts = urlsplit(url)
+    try:
+        host = _normalise_host(parts.hostname or "")
+    except InvalidUrl:  # cannot happen for a URL that passed validation; never crash a redirect
+        return url
+    if ":" in host:  # an IPv6 literal needs its brackets back
+        host = f"[{host}]"
+    netloc = host if parts.port is None else f"{host}:{parts.port}"
+    return urlunsplit(parts._replace(netloc=netloc))
 
 
 def validate_destination_url(url: str, *, short_url_base: str) -> str:

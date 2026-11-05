@@ -565,8 +565,9 @@ async def test_unexpected_crash_is_a_clean_500() -> None:
         async def boom() -> None:
             raise RuntimeError("secret internal detail")
 
-        app.add_api_route("/boom", boom)
-        resp = await c.get("/boom")
+        # A multi-segment path: the catch-all `/{code}` redirect route matches single segments only.
+        app.add_api_route("/api/v1/boom", boom)
+        resp = await c.get("/api/v1/boom")
     assert resp.status_code == 500
     assert resp.json() == {
         "error": {"code": "internal_error", "message": "an unexpected error occurred"}
