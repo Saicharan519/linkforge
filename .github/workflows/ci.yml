@@ -1,12 +1,14 @@
 # Continuous integration: nothing is merged unless lint + tests pass.
-# This workflow only reads the repo and builds nothing publishable; images come later (P1.5 skeleton
-# phase adds build-push.yml). See docs/DEVOPS_GUIDE.md §3.
+# This workflow only reads the repo and publishes nothing. On pull requests it also builds the
+# images and scans them; publishing is build-push.yml, which CALLS this workflow first.
+# See docs/DEVOPS_GUIDE.md §3.
 name: ci
 
 on:
   pull_request:
-  push:
-    branches: [main]
+  # Lets build-push.yml run this whole workflow as its first step (a "reusable workflow").
+  # There is deliberately no `push: main` trigger: on main, build-push.yml runs CI exactly once.
+  workflow_call:
 
 # Least privilege: the automatic GITHUB_TOKEN may only read the repository.
 permissions:
@@ -84,6 +86,34 @@ jobs:
 
       - name: Tests (real Postgres and Redis)
         run: pytest -q
+
+  # Builds both images WITHOUT pushing and applies the Trivy gate, so a broken Dockerfile or a
+  # vulnerable base image fails the pull request, not the deploy. Skipped when this workflow is
+  # called from build-push.yml (event_name is then the caller's "push"): that workflow builds,
+  # scans and pushes the very same images itself.
+  images:
+    name: images (build + trivy)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: api, context: backend}
+          - {name: frontend, context: frontend}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build ${{ matrix.name }} image (not pushed)
+        env:
+          SERVICE: ${{ matrix.name }}
+          CONTEXT: ${{ matrix.context }}
+        run: docker build -t "linkforge-${SERVICE}:ci" "$CONTEXT"
+      - uses: ./.github/actions/image-scan
+        with:
+          image: linkforge-${{ matrix.name }}:ci
 
   # ADVISORY for now (continue-on-error): a finding shows up in the run but does not block merges.
   # It becomes blocking in P6 together with the Trivy gates and branch protection.

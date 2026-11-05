@@ -1,0 +1,130 @@
+# Continuous delivery, the CI half (P1S.3). On every merge to main:
+#   1. run the whole CI workflow (lint + tests); nothing below happens if it fails
+#   2. build both images, Trivy-scan them, push to public GHCR as :sha-<7 chars>
+#   3. commit the new tag into the linkforge-gitops repo
+# CI never touches a cluster. Argo CD (P1S.5) watches the gitops repo and does the deploying.
+# See docs/DEVOPS_GUIDE.md and decisions D5/D49.
+name: build-push
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Merges are processed ONE AT A TIME and never cancelled half way: two overlapping runs would race
+# to edit the same file in the gitops repo.
+concurrency:
+  group: build-push
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: ci
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  publish:
+    name: publish ${{ matrix.name }}
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Only this job may write packages; every other job in this repo keeps the read-only token.
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {name: api, context: backend}
+          - {name: frontend, context: frontend}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compute image name and tag
+        id: meta
+        env:
+          SERVICE: ${{ matrix.name }}
+        run: |
+          # GHCR requires a lowercase repository path; the GitHub user name has capitals.
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "image=ghcr.io/${owner}/linkforge-${SERVICE}" >> "$GITHUB_OUTPUT"
+          # Tag = the commit. Immutable, traceable to the code, and never "latest" (D49).
+          echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      # The "source" label links the package to this repository on GitHub.
+      - name: Build
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          CONTEXT: ${{ matrix.context }}
+        run: |
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            -t "$IMAGE" \
+            "$CONTEXT"
+
+      # The gate sits BEFORE the push: a vulnerable image never reaches the registry.
+      - uses: ./.github/actions/image-scan
+        with:
+          image: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+
+      - name: Log in to GHCR (built-in token, no stored secret)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Push
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+        run: docker push "$IMAGE"
+
+  bump-gitops:
+    name: bump tag in linkforge-gitops
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The built-in token is not used here at all; the gitops repo is reached with GITOPS_TOKEN.
+    permissions: {}
+    steps:
+      - name: Check out the gitops repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/linkforge-gitops
+          # Fine-grained personal access token limited to THAT repository, Contents: read/write.
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops
+          # persist-credentials stays true (the default) on purpose: the next step pushes with it.
+
+      - name: Write the new tag and push
+        working-directory: gitops
+        run: |
+          set -euo pipefail
+          tag="sha-${GITHUB_SHA::7}"
+          file=envs/kind/values.yaml
+          # The tag lines carry marker comments (# ci:api-tag, # ci:frontend-tag) so this edit is
+          # an exact line replacement instead of fragile YAML re-writing.
+          for svc in api frontend; do
+            grep -q "# ci:${svc}-tag" "$file" || { echo "marker ci:${svc}-tag missing in $file"; exit 1; }
+            sed -i -E "s|^([[:space:]]*tag: )\"[^\"]*\"([[:space:]]*# ci:${svc}-tag)|\1\"${tag}\"\2|" "$file"
+          done
+          if git diff --quiet; then
+            echo "Tag is already ${tag}: nothing to commit (a re-run)."
+            exit 0
+          fi
+          git config user.name "linkforge-ci"
+          git config user.email "linkforge-ci@users.noreply.github.com"
+          git commit -am "chore: deploy ${tag} to kind" \
+            -m "Source: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          # If someone pushed to the gitops repo meanwhile, rebase our one-line change on top.
+          for attempt in 1 2 3; do
+            git push origin HEAD:main && exit 0
+            git pull --rebase origin main
+          done
+          echo "could not push after 3 attempts"
+          exit 1
