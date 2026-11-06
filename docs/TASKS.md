@@ -66,7 +66,7 @@ DevOps pointer: §2, §3, §7, §8, §9.
 - ☑ P2.4 (D59; CSRF/Origin checks are P2.5, links still use the dev user until P2.6) Register/login/logout/me, argon2 (semaphore), Redis sessions, rotation, cookie flags, malformed-session handling. *Test:* ARCH §2.4 cases.
 - ☑ P2.5 (D60) CSRF token + Origin check; change password (revokes other sessions only; no session list/revoke endpoints, D18). *Test:* missing token 403, bad Origin 403, change-password kills other sessions but not the current one or API keys.
 - ☑ P2.6 (D61) Replace dev user with real auth; scope every `links` query by `user_id`. *Test:* cross-user = 404 everywhere.
-- ☐ P2.7 API keys (create/list/revoke, `X-API-Key`), per-user create limiter. *Test:* revoked → 401; plaintext never re-readable; limit shared across sessions + keys.
+- ☑ P2.7 (D62) API keys (create/list/revoke, `X-API-Key`), per-user create limiter. *Test:* revoked → 401; plaintext never re-readable; limit shared across sessions + keys.
 - ☐ P2.8 Host guard middleware (`PUBLIC_REDIRECT_HOST`). *Test:* on that host only `GET`/`HEAD /{code}` works. Also: explicit `HEAD /{code}` route that never enqueues a click (D12); create limiter fails closed (D13).
 Done when: all the tests above pass against real Postgres+Redis.
 Prompt:

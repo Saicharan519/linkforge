@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Response
 
-from app.api.deps import AppSettings, AuthUser, DbSession, Now, RedisClient
+from app.api.deps import AppSettings, AuthUser, DbSession, Limiter, Now, RedisClient
 from app.schemas.link import LinkCreate, LinkList, LinkOut, LinkPatch, LinkStatus
 from app.services import links as service
 
@@ -17,10 +17,22 @@ async def create_link(
     body: LinkCreate,
     db: DbSession,
     redis: RedisClient,
+    limiter: Limiter,
     user: AuthUser,
     settings: AppSettings,
     now: Now,
 ) -> LinkOut:
+    # Per USER, not per credential: a session and all of that user's API keys share one budget, so
+    # minting more keys does not buy more links. Fails CLOSED (decision D13): creation is a
+    # low-volume write path, and redirects are unaffected by a Redis outage.
+    await limiter.enforce(
+        "create",
+        str(user.id),
+        limit=settings.rate_limit_create_per_min,
+        window_seconds=60,
+        now_epoch=now.timestamp(),
+        fail_open=False,
+    )
     return await service.create_link(db, redis, user.id, body, settings, now)
 
 

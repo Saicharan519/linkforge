@@ -311,16 +311,19 @@ async def test_hung_redis_costs_one_timeout_not_a_hung_request(
     assert elapsed < 0.6
 
 
-async def test_writes_succeed_when_redis_is_down_and_count_the_failed_delete(
+async def test_edits_succeed_when_redis_is_down_and_count_the_failed_delete(
     api_as: ApiAs, owner: User, db: AsyncSession
 ) -> None:
+    """Editing or deleting works with Redis down; the cache DEL that fails is counted, and the old
+    cached value (if any) lives until its TTL. (CREATING a link is different: its rate limiter
+    fails CLOSED, decision D13, see test_rate_limit.)"""
     link = await make_link(db, owner, "wr00001", destination_url=OLD)
     settings = Settings(database_url=TEST_DATABASE_URL, redis_url=DEAD_REDIS)
     before = redis_errors("cache_del")
     async with api_as(owner, now=NOW, settings=settings) as (_, client):
         patched = await client.patch(f"/api/v1/links/{link.id}", json={"destination_url": NEW})
-        created = await client.post("/api/v1/links", json={"destination_url": NEW})
-    assert (patched.status_code, created.status_code) == (200, 201)
+        deleted = await client.delete(f"/api/v1/links/{link.id}")
+    assert (patched.status_code, deleted.status_code) == (200, 204)
     assert redis_errors("cache_del") == before + 2
 
 

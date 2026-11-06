@@ -7,7 +7,6 @@ covers the whole path (cookie, CSRF, Origin, session lookup, ownership scoping).
 from collections.abc import AsyncIterator
 
 import pytest
-from argon2 import PasswordHasher
 from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,12 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.models import Link, User
 from tests.conftest import TEST_DATABASE_URL
+from tests.integration.browser import ORIGIN, PASSWORD_HASH, Browser
 from tests.integration.conftest import running_app
 from tests.integration.factories import make_link, make_user
 
-PASSWORD = "correct horse battery"
-PASSWORD_HASH = PasswordHasher().hash(PASSWORD)
-ORIGIN = "https://app.example.com"
 LINKS = "/api/v1/links"
 
 
@@ -36,35 +33,6 @@ async def alice(db: AsyncSession) -> User:
 @pytest.fixture
 async def bob(db: AsyncSession) -> User:
     return await make_user(db, "bob@example.com", password_hash=PASSWORD_HASH)
-
-
-class Browser:
-    """An HTTP client that behaves like our frontend: cookies, CSRF header and Origin."""
-
-    def __init__(self, client: AsyncClient) -> None:
-        self.http = client
-
-    async def login(self, email: str) -> "Browser":
-        resp = await self.http.post(
-            "/api/v1/auth/login", json={"email": email, "password": PASSWORD}
-        )
-        assert resp.status_code == 200, resp.text
-        return self
-
-    def headers(self) -> dict[str, str]:
-        return {"X-CSRF-Token": self.http.cookies["lf_csrf"], "Origin": ORIGIN}
-
-    async def post(self, url: str, **kw: object):  # type: ignore[no-untyped-def]
-        return await self.http.post(url, headers=self.headers(), **kw)  # type: ignore[arg-type]
-
-    async def patch(self, url: str, **kw: object):  # type: ignore[no-untyped-def]
-        return await self.http.patch(url, headers=self.headers(), **kw)  # type: ignore[arg-type]
-
-    async def delete(self, url: str):  # type: ignore[no-untyped-def]
-        return await self.http.delete(url, headers=self.headers())
-
-    async def get(self, url: str):  # type: ignore[no-untyped-def]
-        return await self.http.get(url)
 
 
 @pytest.fixture

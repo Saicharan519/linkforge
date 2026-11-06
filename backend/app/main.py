@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import auth, health, links, redirect
+from app.api import api_keys, auth, health, links, redirect
 from app.config import Settings, get_settings
 from app.core.errors import install_error_handlers
 from app.core.passwords import PasswordService
@@ -54,6 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(links.router)
+    app.include_router(api_keys.router)
     # The redirect router `/{code}` must be included LAST: it matches any single-segment path and
     # would otherwise shadow every other root-level route (test_routes_not_shadowed_by_redirect).
     app.include_router(redirect.router)

@@ -21,6 +21,7 @@ from app.core.redis import SafeRedis
 from app.core.sessions import SID_PATTERN, Session, SessionStore
 from app.db import get_db
 from app.models import User
+from app.services import api_keys
 
 
 def get_app_settings(request: Request) -> Settings:
@@ -69,7 +70,7 @@ Passwords = Annotated[PasswordService, Depends(get_passwords)]
 
 
 # ------------------------------------------------------------------------------------------
-# Authentication. A request is authenticated by a session cookie (P2.4); API keys join in P2.7.
+# Authentication: a session cookie (P2.4) or an API key (P2.7).
 # `get_current_user` is the identity of every protected endpoint; the dev user of P1 is gone.
 # ------------------------------------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
@@ -130,8 +131,21 @@ SessionAuth = Annotated[SessionContext, Depends(get_session_context)]
 async def get_current_user(
     request: Request, db: DbSession, sessions: Sessions, now: Now
 ) -> CurrentUser:
-    """Identity for the protected endpoints. 401 if not logged in; for state-changing requests
-    the CSRF token and Origin are checked inside `resolve_session`."""
+    """Identity for the protected endpoints: an API key OR a session cookie.
+
+    Decision D26: if an `X-API-Key` header is present it alone decides. A valid key means no CSRF
+    check (a browser never attaches that header on its own and we send no CORS headers, so another
+    site cannot set it); an invalid key is 401 even if a valid session cookie is also sent. That
+    keeps the rule deterministic: one credential, one answer. Key 401s do not touch the cookies.
+    Without the header, the session cookie is used and state-changing requests get the CSRF and
+    Origin check inside `resolve_session`.
+    """
+    raw_key = request.headers.get("x-api-key")
+    if raw_key is not None:
+        authenticated = await api_keys.authenticate(db, raw_key, now)
+        if authenticated is None:
+            raise ApiError(401, "unauthorized", "invalid API key")
+        return CurrentUser(id=authenticated[0], email=authenticated[1])
     ctx = await resolve_session(request, db, sessions, now)
     return CurrentUser(id=ctx.user_id, email=ctx.email)
 
