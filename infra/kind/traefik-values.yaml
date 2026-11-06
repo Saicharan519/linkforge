@@ -20,6 +20,18 @@ ports:
     expose:
       default: false
 
+providers:
+  kubernetesIngress:
+    # Why: Argo CD (P1S.5) only treats an Ingress as Healthy once its status shows an address.
+    # By default Traefik copies the address of its own Service, but on kind that Service is a
+    # NodePort with no external IP, so the status stays EMPTY and Argo would show the app as
+    # "Progressing" forever. Publishing a fixed address (the machine's loopback, where host
+    # port 80 is mapped) fixes that. The two settings are alternatives, so the default is off.
+    publishedService:
+      enabled: false
+    ingressEndpoint:
+      ip: 127.0.0.1
+
 api:
   # The Traefik dashboard is not needed and would be one more thing to secure.
   dashboard: false
