@@ -129,6 +129,30 @@ class SessionStore:
         pipe.srem(_index_key(user_id), sid)
         return await self._redis.call("session_destroy", pipe.execute(), _FAILED) is not _FAILED
 
+    async def revoke_others(self, user_id: uuid.UUID, keep_sid: str) -> bool:
+        """Delete every session of `user_id` except `keep_sid` (used by change-password).
+
+        The index set can hold ids whose session already expired; they are removed here too, which
+        is the lazy cleanup ARCHITECTURE section 2.4 describes. False if Redis failed.
+        """
+        index = _index_key(user_id)
+        members = await self._redis.call(
+            "session_revoke", self._redis.client.smembers(index), _FAILED
+        )
+        if members is _FAILED:
+            return False
+        others = [
+            sid
+            for sid in members  # type: ignore[attr-defined]
+            if sid != keep_sid and SID_PATTERN.fullmatch(sid)
+        ]
+        if not others:
+            return True
+        pipe = self._redis.client.pipeline(transaction=True)
+        pipe.delete(*[_sess_key(sid) for sid in others])
+        pipe.srem(index, *others)
+        return await self._redis.call("session_revoke", pipe.execute(), _FAILED) is not _FAILED
+
     @staticmethod
     def failed(result: object) -> bool:
         return result is _FAILED

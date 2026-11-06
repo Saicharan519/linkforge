@@ -122,3 +122,30 @@ async def logout(sessions: SessionStore, sid: str, user_id: uuid.UUID) -> None:
     if not await sessions.destroy(sid, user_id):
         # Say so: pretending the session is gone while it still works would be worse than an error.
         raise ApiError(503, "unavailable", "the service is temporarily unavailable")
+
+
+async def change_password(
+    db: AsyncSession,
+    passwords: PasswordService,
+    sessions: SessionStore,
+    user_id: uuid.UUID,
+    current_sid: str,
+    old_password: str,
+    new_password: str,
+) -> None:
+    """Set a new password and end every OTHER session. API keys are NOT touched (they have their
+    own revoke, an explicit decision in ARCHITECTURE section 2.4)."""
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one()
+    if not await passwords.verify(user.password_hash, old_password):
+        # 422 on the field, not 401: a 401 means "your session is invalid" and makes the frontend
+        # log the user out, which a mistyped old password must not do.
+        raise ApiError.validation([("old_password", "incorrect")])
+
+    user.password_hash = await passwords.hash(new_password)
+    await db.commit()
+
+    # After the commit: from now on the new password is the only one that works. A thief holding
+    # an old session must lose it. If Redis cannot do that, say so (503) instead of reporting
+    # success; the password IS already changed, so the user can simply retry.
+    if not await sessions.revoke_others(user_id, current_sid):
+        raise ApiError(503, "unavailable", "the service is temporarily unavailable")

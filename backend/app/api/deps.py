@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.core.client_ip import client_ip
 from app.core.cookies import SESSION_COOKIE
+from app.core.csrf import check_origin, protect_cookie_request
 from app.core.errors import ApiError
 from app.core.passwords import PasswordService
 from app.core.rate_limit import RateLimiter
@@ -137,9 +138,18 @@ async def get_session_context(
         # The account is gone or disabled: the session must not outlive it.
         await sessions.destroy(sid, session.user_id)
         raise ApiError.unauthorized()
+    # A valid cookie session: for state-changing requests also require the CSRF token and Origin.
+    protect_cookie_request(request, request.app.state.settings)
     return SessionContext(
         sid=sid, user_id=session.user_id, email=row.email, created_at=row.created_at
     )
 
 
 SessionAuth = Annotated[SessionContext, Depends(get_session_context)]
+
+
+def origin_guard(request: Request) -> None:
+    """For register and login (decision D25): no cookie exists yet, so no CSRF token, but a
+    browser-sent cross-site request must still be refused (login CSRF would sign the victim in to
+    the attacker's account)."""
+    check_origin(request, request.app.state.settings, strict=False)

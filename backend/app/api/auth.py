@@ -1,6 +1,6 @@
 """/api/v1/auth: register, login, logout, me. Thin router: validate, call the service, respond."""
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 
 from app.api.deps import (
     AppSettings,
@@ -11,22 +11,23 @@ from app.api.deps import (
     Passwords,
     SessionAuth,
     Sessions,
+    origin_guard,
 )
 from app.core.cookies import SESSION_COOKIE, clear_session_cookies, set_session_cookies
 from app.core.sessions import USER_AGENT_MAX
-from app.schemas.auth import LoginRequest, RegisterRequest, UserOut
+from app.schemas.auth import ChangePasswordRequest, LoginRequest, RegisterRequest, UserOut
 from app.services import auth as service
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
-@router.post("/register", status_code=201)
+@router.post("/register", status_code=201, dependencies=[Depends(origin_guard)])
 async def register(body: RegisterRequest, db: DbSession, passwords: Passwords) -> UserOut:
     user = await service.register(db, passwords, body.email, body.password)
     return UserOut(id=user.id, email=user.email, created_at=user.created_at)
 
 
-@router.post("/login")
+@router.post("/login", dependencies=[Depends(origin_guard)])
 async def login(
     body: LoginRequest,
     request: Request,
@@ -67,3 +68,17 @@ async def logout(ctx: SessionAuth, sessions: Sessions, settings: AppSettings) ->
 @router.get("/me")
 async def me(ctx: SessionAuth) -> UserOut:
     return UserOut(id=ctx.user_id, email=ctx.email, created_at=ctx.created_at)
+
+
+@router.post("/change-password", status_code=204)
+async def change_password(
+    body: ChangePasswordRequest,
+    ctx: SessionAuth,
+    db: DbSession,
+    passwords: Passwords,
+    sessions: Sessions,
+) -> Response:
+    await service.change_password(
+        db, passwords, sessions, ctx.user_id, ctx.sid, body.old_password, body.new_password
+    )
+    return Response(status_code=204)

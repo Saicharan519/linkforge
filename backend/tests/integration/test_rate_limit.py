@@ -78,8 +78,18 @@ async def test_counters_are_per_identifier_scope_and_window(limiter: RateLimiter
         await limiter.enforce("redirect", "A", now_epoch=t, **kw)  # type: ignore[arg-type]
 
 
-async def test_concurrent_requests_are_counted_exactly(limiter: RateLimiter) -> None:
-    """50 parallel callers, limit 10: exactly 10 get through (INCR is atomic, no lost updates)."""
+async def test_concurrent_requests_are_counted_exactly() -> None:
+    """50 parallel callers, limit 10: exactly 10 get through (INCR is atomic, no lost updates).
+
+    Generous Redis timeouts: this test is about counting, and 50 connections opened at once on a
+    busy machine can exceed the production 100/200 ms bounds (which would fail OPEN and skew it).
+    """
+    redis = create_redis(
+        settings_with(
+            redis_url=TEST_REDIS_URL, redis_socket_timeout_ms=3000, redis_connect_timeout_ms=3000
+        )
+    )
+    limiter = RateLimiter(redis)
 
     async def one() -> bool:
         try:
@@ -94,7 +104,10 @@ async def test_concurrent_requests_are_counted_exactly(limiter: RateLimiter) -> 
         except ApiError:
             return False
 
-    results = await asyncio.gather(*(one() for _ in range(50)))
+    try:
+        results = await asyncio.gather(*(one() for _ in range(50)))
+    finally:
+        await redis.aclose()
     assert sum(results) == 10
 
 

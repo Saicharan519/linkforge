@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # Sessions and cookies (ARCHITECTURE §2.4, §6.1). Secure cookies need HTTPS: on in production.
     session_ttl_seconds: int = 604800  # 7 days, sliding
     cookie_secure: bool = False
+    # Origins (scheme://host[:port], comma separated) allowed to make state-changing requests with
+    # a session cookie, e.g. "https://app.example.com". Empty = none: the safe default, because a
+    # forgotten setting must fail closed. Local compose sets it for the UI (:8080) and Vite (:5173).
+    allowed_origins: str = ""
 
     # OpenAPI docs are served at /api/docs only when this is true (dev only).
     enable_docs: bool = False
@@ -55,6 +59,11 @@ class Settings(BaseSettings):
     # Public base of short links (e.g. https://go.example.com). Used to build `short_url` and to
     # refuse destinations that point back at our own short domain (redirect loops).
     short_url_base: str = "http://localhost:8000"
+
+    @property
+    def allowed_origin_set(self) -> frozenset[str]:
+        parts = (o.strip().rstrip("/").lower() for o in self.allowed_origins.split(","))
+        return frozenset(p for p in parts if p)
 
 
 @lru_cache

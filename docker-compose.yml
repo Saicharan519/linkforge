@@ -15,6 +15,9 @@ x-backend: &backend
     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-linkforge}:${POSTGRES_PASSWORD:-linkforge_dev}@postgres:5432/${POSTGRES_DB:-linkforge}
     # Same idea as the database: the Redis SERVICE NAME, reachable on the compose network.
     REDIS_URL: redis://redis:6379/0
+    # Pages allowed to make state-changing requests with a session cookie (CSRF Origin check):
+    # the compose UI on :8080 and the Vite dev server on :5173. Empty would allow nothing.
+    ALLOWED_ORIGINS: http://localhost:8080,http://localhost:5173
     ENV: dev
     SHORT_URL_BASE: http://localhost:8000
 

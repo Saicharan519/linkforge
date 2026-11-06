@@ -29,6 +29,13 @@ class LoginRequest(BaseModel):
     password: str = Field(max_length=PASSWORD_MAX)
 
 
+class ChangePasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    old_password: str = Field(max_length=PASSWORD_MAX)
+    new_password: str = Field(min_length=PASSWORD_MIN, max_length=PASSWORD_MAX)
+
+
 class UserOut(BaseModel):
     id: uuid.UUID
     email: str

@@ -32,6 +32,7 @@ DEAD_DB = "postgresql+asyncpg://nobody:nopass@127.0.0.1:1/none"
 PASSWORD_HASH = PasswordHasher().hash(PASSWORD)
 
 LOGIN = "/api/v1/auth/login"
+ORIGIN = "https://app.example.com"  # the one allowed origin in these tests
 
 
 def settings_with(**overrides: object) -> Settings:
@@ -50,7 +51,7 @@ async def user(db: AsyncSession) -> User:
 
 @pytest.fixture
 async def client() -> AsyncIterator[AsyncClient]:  # shadows the default: same app, fresh cookies
-    async with running_app(settings_with()) as (_, c):
+    async with running_app(settings_with(allowed_origins=ORIGIN)) as (_, c):
         yield c
 
 
@@ -71,6 +72,11 @@ def plant(client: AsyncClient, name: str, value: str) -> None:
     """Put a cookie in the client exactly where the server-set ones live (the test app is served
     as host test.local), so it REPLACES the existing cookie instead of adding a second one."""
     client.cookies.set(name, value, domain="test.local", path="/")
+
+
+def unsafe(client: AsyncClient) -> dict[str, str]:
+    """What our own frontend sends on a state-changing request: the CSRF token and the Origin."""
+    return {"X-CSRF-Token": client.cookies["lf_csrf"], "Origin": ORIGIN}
 
 
 def set_cookie_headers(resp: Response) -> dict[str, str]:
@@ -484,7 +490,7 @@ async def test_logout_destroys_the_session_and_clears_cookies(
 ) -> None:
     await login(client)
     sid = client.cookies["lf_session"]
-    resp = await client.post("/api/v1/auth/logout")
+    resp = await client.post("/api/v1/auth/logout", headers=unsafe(client))
     assert resp.status_code == 204
     assert resp.content == b""
     assert set(set_cookie_headers(resp)) == {"lf_session", "lf_csrf"}
@@ -498,11 +504,11 @@ async def test_logout_destroys_the_session_and_clears_cookies(
 async def test_logout_only_ends_this_session(client: AsyncClient, user: User) -> None:
     await login(client)
     first = client.cookies["lf_session"]
-    async with running_app(settings_with()) as (_, other):
+    async with running_app(settings_with(allowed_origins=ORIGIN)) as (_, other):
         await login(other)  # a second device
         second = other.cookies["lf_session"]
         assert first != second
-        await client.post("/api/v1/auth/logout")
+        await client.post("/api/v1/auth/logout", headers=unsafe(client))
         assert (await other.get("/api/v1/auth/me")).status_code == 200
 
 
