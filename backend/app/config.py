@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     # Click worker (ARCHITECTURE §2.3, §9.1).
     worker_batch_size: int = 100  # messages read and stored per transaction
     worker_block_ms: int = 2000  # how long XREADGROUP waits when the stream is empty
+    # Messages pending longer than this are taken over (XAUTOCLAIM): a crashed worker's, or ones
+    # that failed before. The reclaim check runs every worker_claim_interval_seconds.
+    worker_claim_idle_ms: int = 60000
+    worker_claim_interval_seconds: int = 30
+    # A message delivered this many times without success goes to the dead-letter stream.
+    max_deliveries: int = 5
+    click_dead_maxlen: int = 10000  # approximate cap of clicks:dead (a memory guard)
 
     # OpenAPI docs are served at /api/docs only when this is true (dev only).
     enable_docs: bool = False

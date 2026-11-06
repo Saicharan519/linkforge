@@ -1,4 +1,4 @@
-"""The click consumer (ARCHITECTURE §2.3). Task P3.2: the happy path, batch by batch.
+"""The click consumer (ARCHITECTURE §2.3).
 
 Delivery is AT LEAST ONCE: a message may be handed to a worker more than once (a crash after the
 database commit but before the acknowledgement). Processing is therefore IDEMPOTENT: the unique
@@ -12,21 +12,32 @@ One batch, in one Postgres transaction:
   3. add one to the daily counter of each (link, UTC day) for the new, non-bot rows only;
   4. COMMIT. Only AFTER the commit are the messages acknowledged (XACK).
 Acknowledging before the commit would lose clicks if the worker died in between.
+
+When things go wrong (task P3.3):
+  - a batch fails -> each message is retried ALONE, so one bad event cannot block 99 good ones;
+  - a message that keeps failing stays PENDING, is reclaimed (XAUTOCLAIM) when it has been idle
+    long enough, and after MAX_DELIVERIES deliveries it is moved to the dead-letter stream;
+  - the database being unreachable is not the message's fault: nothing is retried one by one, the
+    batch just stays pending;
+  - the stream or group disappearing (Redis wiped) is repaired by recreating the group;
+  - SIGTERM finishes the current batch, acknowledges it, and exits.
 """
 
+import asyncio
 import logging
 import socket
 import time
 import uuid
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from redis.asyncio import Redis
-from redis.exceptions import ResponseError
+from redis.exceptions import RedisError, ResponseError
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DBAPIError, IntegrityError, InterfaceError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
@@ -38,6 +49,12 @@ from app.worker.ua import UAInfo, parse_user_agent
 logger = logging.getLogger(__name__)
 
 GROUP = "click-workers"
+DEAD_STREAM = "clicks:dead"
+
+# One reclaim tick walks at most this many pages of idle messages, so a huge backlog of stuck
+# messages cannot keep the worker from reading new ones.
+MAX_RECLAIM_PAGES = 10
+ERROR_PAUSE_SECONDS = 1.0
 
 
 class MalformedMessage(Exception):
@@ -61,6 +78,7 @@ class BatchResult:
     duplicates: int  # already stored (a redelivery, or the same event twice)
     orphans: int  # their link no longer exists
     ack_ids: list[str]  # every message that is finished and may be acknowledged
+    dead: int = 0  # moved to the dead-letter stream
 
 
 def parse_message(msg_id: str, fields: Mapping[str, str]) -> ClickMessage:
@@ -85,23 +103,54 @@ def parse_message(msg_id: str, fields: Mapping[str, str]) -> ClickMessage:
         raise MalformedMessage(f"{type(exc).__name__}: {exc}") from None
 
 
+def is_fk_violation(exc: BaseException) -> bool:
+    """Postgres refused the insert because the link row is gone (SQLSTATE 23503): the link was
+    deleted between our orphan check and the insert. Not an error: the click is an orphan."""
+    if not isinstance(exc, IntegrityError):
+        return False
+    orig = exc.orig
+    return getattr(orig, "sqlstate", None) == "23503" or getattr(orig, "pgcode", None) == "23503"
+
+
+def is_connectivity_error(exc: BaseException) -> bool:
+    """The database could not be reached. The MESSAGES are not at fault, so retrying them one by
+    one would only repeat the same timeout a hundred times."""
+    if isinstance(exc, OSError | TimeoutError | InterfaceError):
+        return True
+    return isinstance(exc, DBAPIError) and exc.connection_invalidated
+
+
+def describe(exc: BaseException) -> str:
+    """A short, safe description for logs and the dead-letter record. The SQLAlchemy message
+    includes the statement and its PARAMETERS, so only the driver's own message is used."""
+    inner = getattr(exc, "orig", exc)
+    return f"{type(exc).__name__}: {inner}"[:300]
+
+
 async def process_batch(
     sessionmaker: async_sessionmaker[AsyncSession],
     messages: Sequence[ClickMessage],
     parse_ua: Callable[[str | None], UAInfo] = parse_user_agent,
+    *,
+    _after_prefilter: Callable[[], Awaitable[None]] | None = None,
 ) -> BatchResult:
     """Store a batch in ONE transaction (steps 1-4 of the module docstring). Does NOT touch Redis:
-    the caller acknowledges the returned ids after this function has returned, i.e. after COMMIT."""
+    the caller acknowledges the returned ids after this function has returned, i.e. after COMMIT.
+
+    `_after_prefilter` is a test hook that runs between the orphan check and the insert, the exact
+    window in which a link can be deleted.
+    """
     if not messages:
         return BatchResult(0, 0, 0, [])
 
     async with sessionmaker() as session, session.begin():
         # 1. Orphan pre-filter: links deleted between the click and now.
         wanted = {m.link_id for m in messages}
-        existing = set(
-            (await session.execute(select(Link.id).where(Link.id.in_(wanted)))).scalars()
-        )
+        found = await session.execute(select(Link.id).where(Link.id.in_(wanted)))
+        existing = set(found.scalars())
         live = [m for m in messages if m.link_id in existing]
+        if _after_prefilter is not None:
+            await _after_prefilter()
 
         inserted: list[tuple[uuid.UUID, datetime, bool]] = []
         if live:
@@ -188,9 +237,11 @@ class ClickConsumer:
         self.sessionmaker = sessionmaker
         self.settings = settings
         # The pod name: stable for the life of a pod and unique among pods, so a restarted pod is
-        # recognisable and its pending messages can be reclaimed (P3.3).
+        # recognisable and its pending messages can be reclaimed.
         self.name = consumer_name or socket.gethostname()
         self.parse_ua = parse_ua
+
+    # --- the group ----------------------------------------------------------------------------
 
     async def ensure_group(self) -> None:
         """Create the consumer group at `0` (and the stream if it does not exist yet).
@@ -202,6 +253,8 @@ class ClickConsumer:
         except ResponseError as exc:
             if "BUSYGROUP" not in str(exc):  # it already exists: fine
                 raise
+
+    # --- reading ------------------------------------------------------------------------------
 
     async def read_batch(self) -> list[tuple[str, dict[str, str]]]:
         """New messages for this consumer (blocks up to WORKER_BLOCK_MS when there are none)."""
@@ -216,30 +269,198 @@ class ClickConsumer:
             return []
         return [(msg_id, fields) for _, entries in response for msg_id, fields in entries]
 
+    # --- storing ------------------------------------------------------------------------------
+
     async def handle(self, entries: Sequence[tuple[str, Mapping[str, str]]]) -> BatchResult | None:
-        """Process one batch and acknowledge it. Returns None for an empty batch."""
+        """Process one batch and acknowledge what is finished. None for an empty batch."""
         if not entries:
             return None
         started = time.monotonic()
+
         messages: list[ClickMessage] = []
+        dead = 0
         for msg_id, fields in entries:
             try:
                 messages.append(parse_message(msg_id, fields))
             except MalformedMessage as exc:
-                # Left PENDING (never acknowledged). Dead-lettering is task P3.3.
-                logger.error("click %s is malformed and stays pending (%s)", msg_id, exc)
+                # Retrying can never fix a message that is missing fields: straight to the dead
+                # letters (and only acknowledged once the dead-letter write has succeeded).
+                if await self._dead_letter(msg_id, fields, f"malformed: {exc}"):
+                    dead += 1
 
-        result = await process_batch(self.sessionmaker, messages, self.parse_ua)
+        result = await self._store(messages)
+        await self._finish(result)
+        CLICK_BATCH_SECONDS.observe(time.monotonic() - started)
+        return BatchResult(
+            result.inserted, result.duplicates, result.orphans, result.ack_ids, dead=dead
+        )
 
-        # Strictly AFTER the commit inside process_batch.
-        if result.ack_ids:
-            await self.redis.xack(STREAM, GROUP, *result.ack_ids)
+    async def _store(self, messages: Sequence[ClickMessage]) -> BatchResult:
+        """The whole batch in one transaction; if that fails, each message on its own."""
+        try:
+            return await process_batch(self.sessionmaker, messages, self.parse_ua)
+        except Exception as exc:
+            if is_connectivity_error(exc):
+                raise  # not the messages' fault: leave them all pending
+            logger.warning(
+                "batch of %d failed (%s); retrying each message", len(messages), describe(exc)
+            )
+            return await self._store_each(messages)
 
+    async def _store_each(self, messages: Sequence[ClickMessage]) -> BatchResult:
+        """Fallback: one transaction per message. A message that fails stays PENDING (it is
+        redelivered later and, if it never succeeds, dead-lettered); the others go through."""
+        inserted = duplicates = orphans = 0
+        ack_ids: list[str] = []
+        for m in messages:
+            try:
+                r = await process_batch(self.sessionmaker, [m], self.parse_ua)
+            except Exception as exc:
+                if is_fk_violation(exc):
+                    # The link vanished between the orphan check and the insert: an orphan.
+                    orphans += 1
+                    ack_ids.append(m.msg_id)
+                    continue
+                if is_connectivity_error(exc):
+                    # Finish what was stored so far (it is committed: it must be acknowledged),
+                    # then stop; the rest stays pending.
+                    await self._finish(BatchResult(inserted, duplicates, orphans, ack_ids))
+                    raise
+                logger.error("click %s failed and stays pending (%s)", m.msg_id, describe(exc))
+                continue
+            inserted += r.inserted
+            duplicates += r.duplicates
+            orphans += r.orphans
+            ack_ids.extend(r.ack_ids)
+        return BatchResult(inserted, duplicates, orphans, ack_ids)
+
+    async def _finish(self, result: BatchResult) -> None:
+        """Acknowledge (strictly AFTER the commit that happened in process_batch) and count."""
+        await self._ack(result.ack_ids)
         CLICKS_PROCESSED.labels(status="ok").inc(result.inserted)
         CLICKS_PROCESSED.labels(status="duplicate").inc(result.duplicates)
         CLICKS_PROCESSED.labels(status="orphan").inc(result.orphans)
-        CLICK_BATCH_SECONDS.observe(time.monotonic() - started)
-        return result
+
+    async def _ack(self, ids: Sequence[str]) -> None:
+        if not ids:
+            return
+        try:
+            await self.redis.xack(STREAM, GROUP, *ids)
+        except ResponseError as exc:
+            # NOGROUP: Redis was wiped after the commit. The data is safe in Postgres and there is
+            # nothing left to acknowledge in a group that no longer exists.
+            if "NOGROUP" not in str(exc):
+                raise
+            logger.warning("ack skipped: the consumer group no longer exists")
+
+    # --- giving up on a message ---------------------------------------------------------------
+
+    async def _dead_letter(self, msg_id: str, fields: Mapping[str, str], error: str) -> bool:
+        """Move a message to `clicks:dead`. The original is acknowledged ONLY IF that write
+        succeeded: if it fails, the message stays pending and is tried again, so a failing
+        dead-letter stream can never turn into silent loss."""
+        record = {
+            **fields,
+            "original_id": msg_id,
+            "error": error[:500],
+            "failed_at": datetime.now(UTC).isoformat(),
+        }
+        try:
+            await self.redis.xadd(
+                DEAD_STREAM, record, maxlen=self.settings.click_dead_maxlen, approximate=True
+            )  # type: ignore[arg-type]
+        except RedisError as exc:
+            logger.error(
+                "dead-letter write for %s failed (%s); it stays pending", msg_id, type(exc).__name__
+            )
+            return False
+        await self._ack([msg_id])
+        CLICKS_PROCESSED.labels(status="dead").inc()
+        logger.error("click %s moved to %s (%s)", msg_id, DEAD_STREAM, error[:120])
+        return True
+
+    # --- reclaiming ---------------------------------------------------------------------------
+
+    async def reclaim(self) -> int:
+        """Take over messages that have been pending too long (a crashed worker's, or ones that
+        failed before) and process them. Returns how many were claimed."""
+        claimed_total = 0
+        cursor = "0-0"
+        for _ in range(MAX_RECLAIM_PAGES):
+            page = await self.redis.xautoclaim(
+                STREAM,
+                GROUP,
+                self.name,
+                min_idle_time=self.settings.worker_claim_idle_ms,
+                start_id=cursor,
+                count=self.settings.worker_batch_size,
+            )
+            next_cursor, claimed = page[0], page[1]
+            if claimed:
+                claimed_total += len(claimed)
+                await self._handle_claimed(claimed)
+            if next_cursor == "0-0":
+                break
+            cursor = next_cursor
+        return claimed_total
+
+    async def _handle_claimed(self, claimed: Sequence[tuple[str, Mapping[str, str]]]) -> None:
+        # XAUTOCLAIM does not report how often a message was delivered; the extended XPENDING
+        # does. (Claiming just raised the count by one.)
+        pending = await self.redis.xpending_range(
+            STREAM,
+            GROUP,
+            min=claimed[0][0],
+            max=claimed[-1][0],
+            count=max(100, len(claimed) * 10),
+            consumername=self.name,
+        )
+        deliveries = {p["message_id"]: p["times_delivered"] for p in pending}
+
+        retry: list[tuple[str, Mapping[str, str]]] = []
+        for msg_id, fields in claimed:
+            count = deliveries.get(msg_id, 0)
+            if count >= self.settings.max_deliveries:
+                await self._dead_letter(
+                    msg_id, fields, f"gave up after {count} deliveries without success"
+                )
+            else:
+                retry.append((msg_id, fields))
+        await self.handle(retry)
+
+    # --- the loop -----------------------------------------------------------------------------
 
     async def run_once(self) -> BatchResult | None:
         return await self.handle(await self.read_batch())
+
+    async def run_forever(self, stop: asyncio.Event) -> None:
+        """Work until `stop` is set. The batch in progress always finishes (and is acknowledged)
+        first, so a SIGTERM never leaves a half-done batch behind."""
+        await self.ensure_group()
+        last_reclaim = float("-inf")  # reclaim right at start: leftovers from before a restart
+        while not stop.is_set():
+            try:
+                if time.monotonic() - last_reclaim >= self.settings.worker_claim_interval_seconds:
+                    last_reclaim = time.monotonic()
+                    await self.reclaim()
+                await self.run_once()
+            except ResponseError as exc:
+                if "NOGROUP" not in str(exc):
+                    logger.exception("redis error; retrying")
+                    await self._pause(stop)
+                    continue
+                # Redis was wiped (stream or group gone): recreate the group, at 0, and carry on.
+                logger.warning("consumer group missing; recreating it")
+                await self.ensure_group()
+            except Exception:
+                # One bad round must not kill the worker. The batch is still pending, so it will
+                # be delivered again.
+                logger.exception("round failed; it will be retried")
+                await self._pause(stop)
+
+    @staticmethod
+    async def _pause(stop: asyncio.Event) -> None:
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=ERROR_PAUSE_SECONDS)
+        except TimeoutError:
+            pass

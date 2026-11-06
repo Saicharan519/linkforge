@@ -2,15 +2,13 @@
 
 import asyncio
 import logging
+import signal
 
 from app.config import get_settings
 from app.db import create_engine, create_sessionmaker
 from app.worker.consumer import ClickConsumer, create_worker_redis
 
 logger = logging.getLogger("app.worker")
-
-# After an error (Redis or Postgres unreachable) wait a moment instead of spinning.
-ERROR_PAUSE_SECONDS = 1.0
 
 
 async def main() -> None:
@@ -21,18 +19,19 @@ async def main() -> None:
     engine = create_engine(settings, pool_size=2, max_overflow=1)
     redis = create_worker_redis(settings)
     consumer = ClickConsumer(redis, create_sessionmaker(engine), settings)
+
+    # SIGTERM is what Kubernetes sends when it stops a pod. We only SET A FLAG: the batch in
+    # progress finishes and is acknowledged, then the loop ends and the process exits with 0.
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+
     logger.info("click worker %s starting", consumer.name)
     try:
-        await consumer.ensure_group()
-        while True:
-            try:
-                await consumer.run_once()
-            except Exception:  # noqa: BLE001 - one bad batch must not kill the worker
-                # The batch stays unacknowledged, so it is delivered again. (Per-event fallback
-                # and poison handling are task P3.3.)
-                logger.exception("batch failed; it will be retried")
-                await asyncio.sleep(ERROR_PAUSE_SECONDS)
+        await consumer.run_forever(stop)
     finally:
+        logger.info("click worker %s stopping", consumer.name)
         await redis.aclose()
         await engine.dispose()
 

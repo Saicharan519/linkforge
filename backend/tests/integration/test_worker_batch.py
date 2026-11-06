@@ -433,12 +433,14 @@ async def test_a_malformed_message_does_not_block_the_valid_ones(
     link = await make_link(db, owner, "mal0001")
     await consumer.ensure_group()
     await add(raw, link)
-    bad_id = await raw.xadd(STREAM, {"event_id": "nope"})
+    await raw.xadd(STREAM, {"event_id": "nope"})
     await add(raw, link)
     result = await consumer.run_once()
-    assert result is not None and result.inserted == 2
-    pending = await raw.xpending_range(STREAM, GROUP, "-", "+", 10)
-    assert [p["message_id"] for p in pending] == [bad_id]  # left pending (dead-letter is P3.3)
+    assert result is not None and result.inserted == 2 and result.dead == 1
+    # A message that can never parse goes straight to the dead letters and is acknowledged
+    # (details in test_worker_failures.py).
+    assert (await raw.xpending(STREAM, GROUP))["pending"] == 0
+    assert await raw.xlen("clicks:dead") == 1
 
 
 async def test_a_big_backlog_is_worked_off_in_batches(

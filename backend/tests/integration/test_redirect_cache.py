@@ -245,7 +245,9 @@ async def test_stale_race_entry_is_served_but_expires_within_the_ttl(
         # Accepted limitation: the stale value is served...
         assert (await client.get("/race001")).headers["location"] == OLD
         # ...but only for the (here 1 s) TTL, never longer.
-        assert 0 < await raw.ttl("link:race001") <= 1
+        assert (
+            0 < await raw.pttl("link:race001") <= 1000
+        )  # milliseconds: TTL (seconds) rounds to 0 when slow
         await asyncio.sleep(1.3)
         assert (await client.get("/race001")).headers["location"] == NEW
 
