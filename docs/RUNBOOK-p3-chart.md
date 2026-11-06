@@ -41,6 +41,18 @@ expand/contract rule).
 job/migrate`, the new image reached the cluster before a chart that gives the Job the secret: push
 the chart (step 2) and refresh Argo; the old API pods keep serving meanwhile, nothing is lost.
 
+**If the `migrate` pods keep failing AFTER you pushed the fix:** an Argo sync operation is pinned
+to the commit it started with, and its automatic retries reuse that commit, so the old, broken
+revision is still being retried. Check with
+`kubectl -n argocd get app linkforge -o jsonpath='{.status.sync.revision} {.status.operationState.syncResult.revision}'`
+(two different commits = this situation) and cancel the running operation so a fresh sync starts
+from the latest commit:
+
+```bash
+kubectl -n argocd patch app linkforge --type merge -p '{"operation":null}'
+kubectl -n argocd annotate app linkforge argocd.argoproj.io/refresh=hard --overwrite
+```
+
 **Local port numbers.** If `docker compose` is running on this machine it already publishes
 9101 (API metrics) and 9100 (worker metrics) on localhost, so a port-forward to the same numbers
 would clash, or worse, `curl localhost:9101` would show the COMPOSE stack and not the cluster.
