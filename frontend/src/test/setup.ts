@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { setUnauthorizedHandler } from "@/api/client";
 import { server } from "./server";
@@ -8,6 +8,10 @@ import { server } from "./server";
 const nodeFetch = globalThis.fetch;
 globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) =>
   nodeFetch(typeof input === "string" && input.startsWith("/") ? new URL(input, window.location.origin) : input, init);
+
+// findBy*/waitFor wait up to 4 s (default 1 s): tests run in parallel and a busy machine, or CI,
+// can take longer than a second to render a screen. A slow render is not a failure.
+configure({ asyncUtilTimeout: 4000 });
 
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 

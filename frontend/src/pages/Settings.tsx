@@ -1,8 +1,10 @@
 import { ApiKeysSection } from "@/components/settings/ApiKeysSection";
 import { ChangePasswordForm } from "@/components/settings/ChangePasswordForm";
 import { useSession } from "@/hooks/useSession";
+import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
 export default function Settings() {
+  useDocumentTitle("Settings");
   const session = useSession();
   return (
     <div className="space-y-10">

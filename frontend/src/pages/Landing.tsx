@@ -4,6 +4,7 @@ import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { RouteTrace } from "@/components/landing/RouteTrace";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/hooks/useSession";
+import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
 const FEATURES = [
   {
@@ -24,6 +25,7 @@ const FEATURES = [
 ];
 
 export default function Landing() {
+  useDocumentTitle("Short links with click counts");
   const session = useSession();
   const signedIn = Boolean(session.data);
 

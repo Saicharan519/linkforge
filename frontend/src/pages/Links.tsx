@@ -13,6 +13,7 @@ import { EmptyState, ErrorState, LoadingRows } from "@/components/ui/states";
 import { useLinks, useUpdateLink } from "@/hooks/useLinks";
 import { describeError } from "@/lib/forms";
 import { formatCount } from "@/lib/format";
+import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
 const PAGE_SIZE = 20;
 const SEARCH_DELAY_MS = 300;
@@ -27,6 +28,7 @@ const parsePage = (v: string | null) => {
 type DialogState = { kind: "create" } | { kind: "edit"; link: Link } | { kind: "delete"; link: Link } | null;
 
 export default function Links() {
+  useDocumentTitle("Links");
   // Filters and page live in the URL: reload, back and shared links all keep the view.
   const [params, setParams] = useSearchParams();
   const q = params.get("q") ?? "";
@@ -128,7 +130,7 @@ export default function Links() {
             id="link-status"
             value={status ?? ""}
             onChange={(e) => change({ status: e.target.value as LinkStatus | "" })}
-            className="h-10 rounded-lg border-2 border-line bg-plate px-3 text-sm"
+            className="h-10 w-40 rounded-lg border-2 border-line bg-plate px-3 text-sm"
           >
             <option value="">All</option>
             <option value="active">Active</option>

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { useLogin, useSession } from "@/hooks/useSession";
 import { applyApiErrors, safeReturnPath } from "@/lib/forms";
+import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
 interface LoginValues {
   email: string;
@@ -13,6 +14,7 @@ interface LoginValues {
 }
 
 export default function Login() {
+  useDocumentTitle("Sign in");
   const location = useLocation();
   const session = useSession();
   const login = useLogin();

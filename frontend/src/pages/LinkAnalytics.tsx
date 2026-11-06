@@ -15,6 +15,7 @@ import { useLink } from "@/hooks/useLinks";
 import { describeError } from "@/lib/forms";
 import { formatCount } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
 const RANGES: { value: RangeName; label: string }[] = [
   { value: "7d", label: "7 days" },
@@ -27,6 +28,7 @@ const parseRange = (v: string | null): RangeName => RANGES.find((r) => r.value =
 const DEVICE_LABEL = { desktop: "Desktop", mobile: "Mobile", tablet: "Tablet", other: "Other" } as const;
 
 export default function LinkAnalytics() {
+  useDocumentTitle("Link analytics");
   const { id = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const range = parseRange(params.get("range"));

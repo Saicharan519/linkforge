@@ -199,10 +199,13 @@
     opacity: 0.55;
   }
 }
-.lf-skeleton {
-  background: var(--muted);
-  border-radius: 0.375rem;
-  animation: lf-pulse 1.6s ease-in-out infinite;
+/* In the components layer so a utility class (rounded-full, bg-signal) on the same element wins. */
+@layer components {
+  .lf-skeleton {
+    background: var(--muted);
+    border-radius: 0.375rem;
+    animation: lf-pulse 1.6s ease-in-out infinite;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -25,6 +25,13 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen md:grid md:grid-cols-[15rem_1fr]">
+      {/* first stop for keyboard users: jump past the navigation */}
+      <a
+        href="#main"
+        className="sr-only z-50 rounded-lg border-2 border-line bg-signal px-3 py-2 font-bold text-signal-foreground focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+      >
+        Skip to content
+      </a>
       <aside className="border-b-2 border-line bg-plate md:sticky md:top-0 md:flex md:h-screen md:flex-col md:border-r-2 md:border-b-0">
         <div className="flex items-center justify-between px-4 py-3 md:px-5 md:py-5">
           <NavLink to="/app" aria-label="LinkForge dashboard">
@@ -94,7 +101,7 @@ export function AppShell() {
             <LogOut aria-hidden="true" /> Sign out
           </Button>
         </header>
-        <main className="mx-auto w-full max-w-6xl p-4 md:p-8">
+        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-6xl p-4 outline-none md:p-8">
           <Outlet />
         </main>
       </div>

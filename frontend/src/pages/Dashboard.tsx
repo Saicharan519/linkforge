@@ -9,10 +9,12 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 import { useOverview } from "@/hooks/useAnalytics";
 import { describeError } from "@/lib/forms";
 import { formatCount } from "@/lib/format";
+import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
 const RANGE = "30d";
 
 export default function Dashboard() {
+  useDocumentTitle("Dashboard");
   const overview = useOverview(RANGE);
   const data = overview.data;
 

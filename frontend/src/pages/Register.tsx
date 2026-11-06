@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { useRegister, useSession } from "@/hooks/useSession";
 import { applyApiErrors } from "@/lib/forms";
+import { useDocumentTitle } from "@/lib/useDocumentTitle";
 
 // The API's rule (PRD F1): 10 to 128 characters. The API stays the authority; this only saves a round trip.
 const PASSWORD_MIN = 10;
@@ -19,6 +20,7 @@ interface RegisterValues {
 }
 
 export default function Register() {
+  useDocumentTitle("Create your account");
   const navigate = useNavigate();
   const session = useSession();
   const registerAccount = useRegister();
