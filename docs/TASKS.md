@@ -88,7 +88,7 @@ Prompt:
 DevOps pointer: §11.
 
 ## P4 — Frontend dashboard
-- ☐ P4.1 Vite+TS+Tailwind+shadcn setup, API client (cookies + CSRF), router, protected routes.
+- ☑ P4.1 Vite+TS+Tailwind+shadcn setup, API client (cookies + CSRF), router, protected routes.
 - ☐ P4.2 Register/Login/Landing. ☐ P4.3 Links page (search/filter/pagination/create/edit/delete/copy). ☐ P4.4 Dashboard + Link analytics (Recharts, UTC date labels as-is). ☐ P4.5 Settings (API keys, change password). ☐ P4.6 loading/empty/error states + responsive checks. ☐ P4.7 Vitest + RTL tests; add the frontend job to CI.
 Done when: lint, typecheck, test, build pass; manual run of PRD F1–F6 works against the real backend.
 Prompt:

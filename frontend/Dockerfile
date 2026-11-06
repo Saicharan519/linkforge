@@ -17,7 +17,9 @@ RUN apk upgrade --no-cache zlib
 
 # Replace the default server block with ours. Files are root-owned and read-only to uid 101.
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY public /usr/share/nginx/html
+# The placeholder page moved from public/ to placeholder/ in P4.1 because Vite owns public/ and
+# index.html now. The image content is unchanged until P4.7 swaps this for the real build output.
+COPY placeholder /usr/share/nginx/html
 
 # Already non-root in the base image; stated explicitly (numeric) so Kubernetes' runAsNonRoot can verify it.
 USER 101

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>LinkForge</title>
+    <meta name="description" content="Short links with click counts. The redirect happens first; the counting happens after." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Sets the theme class before first paint (no flash). A separate file, not inline: the
+         Content-Security-Policy is default-src 'self', which blocks inline scripts. -->
+    <script src="/theme-init.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
