@@ -35,6 +35,12 @@ image that cannot run it. `worker.enabled: false` is a feature flag: the chart s
 early and you switch it on once the image underneath is ready (the same idea as the database
 expand/contract rule).
 
+**Everything that starts the application image needs the secret, including the migration Job.**
+`alembic` loads the app's settings, and the settings require `IP_HASH_SECRET`. If you ever see the
+`migrate` pods in `Error` with `ip_hash_secret Field required` in `kubectl -n linkforge logs
+job/migrate`, the new image reached the cluster before a chart that gives the Job the secret: push
+the chart (step 2) and refresh Argo; the old API pods keep serving meanwhile, nothing is lost.
+
 ## 1. Create the secret key (by hand, never in git, never pasted anywhere)
 
 The value is generated in YOUR terminal and goes straight into the cluster; I never see it.
