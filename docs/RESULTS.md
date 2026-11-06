@@ -33,6 +33,16 @@ by SIGKILL when the grace period ends (exit 137). A READY api container stops in
 exit 0 and a clean "Application shutdown complete" log. The Kubernetes-side timing was not
 measured directly.
 
+## P2 on kind (Redis chart follow-up, docs/RUNBOOK-redis-chart.md)
+
+| Drill | Observed |
+|---|---|
+| Redis pod deleted: redirects keep working, login fails closed, session survives the restart | |
+| Required setting forgotten in git: Argo shows ComparisonError, cluster unchanged,  heals | |
+| Settings-only change rolls the API pods (checksum/config) | |
+| 130 requests through Traefik to the go host: about 120 x 302 then 429 | |
+| go host answers 404 for /healthz and /api/v1/links; app host unrestricted | |
+
 ## Resource use on kind (validates ARCHITECTURE §9.3 estimates)
 
 Paste `kubectl top pods -n linkforge` and `kubectl top nodes` here, idle and (later) under load:
