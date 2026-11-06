@@ -22,6 +22,7 @@ pod Ready, and the total.
 | Delete an API pod: requests keep succeeding | Loop printed `302` throughout (screenshot, 2026-11-06) |
 | Scale Postgres to 0: readiness fails, no restarts | `503`s while Postgres was down, `302` again after it returned; restarts stayed 0 |
 | Plain Helm upgrade with a new image tag fails on the immutable Job | Revision 4 `failed`; a new api pod in `ImagePullBackOff` while 2 old pods served; fixed with `helm rollback linkforge 3` |
+| CI gate caught a new CVE on its own | `build-push` for 2ea2fc9 failed at the image-scan step (frontend); no image pushed, no gitops bump. Reproduced locally: zlib CVE-2026-85091 HIGH, fixable. Fixed with a temporary `apk upgrade zlib` layer; both images then scan clean (D54) |
 | Pod right after `helm install` (no ordering): migrate Job failed once, then passed | `migrate-5pvsm` Error (DNS name for the headless Service did not exist yet), `migrate-nb524` Completed |
 
 ## Resource use on kind (validates ARCHITECTURE §9.3 estimates)

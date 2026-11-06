@@ -6,6 +6,15 @@
 # (ports below 1024 need root). Pinned by tag AND digest, same reasoning as the backend (D47).
 FROM nginxinc/nginx-unprivileged:1.30-alpine-slim@sha256:5d8bb9437d74a600ec5dbf90c035451c724dc33eac8d3a71078f6f8612c345f6
 
+# TEMPORARY security fix. The Trivy gate in CI (build-push.yml) started failing on 2026-11-06:
+# CVE-2026-85091 (HIGH, heap overflow in zlib 1.3.2-r0, fixed in 1.3.2-r1). Our base image is
+# pinned by digest, so it keeps the vulnerable zlib until upstream publishes a rebuilt image
+# (checked: neither the 1.30 nor the newest alpine-slim tag had one yet). Until then we upgrade
+# just that one package ourselves. Needs root for the moment; USER 101 below drops it again.
+# REMOVE this block when a bumped base digest scans clean on its own (Dependabot, P6).
+USER root
+RUN apk upgrade --no-cache zlib
+
 # Replace the default server block with ours. Files are root-owned and read-only to uid 101.
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY public /usr/share/nginx/html
