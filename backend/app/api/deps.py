@@ -6,8 +6,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, Request
-from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,37 +67,10 @@ ClientIp = Annotated[str, Depends(get_client_ip)]
 Sessions = Annotated[SessionStore, Depends(get_sessions)]
 Passwords = Annotated[PasswordService, Depends(get_passwords)]
 
-# ------------------------------------------------------------------------------------------
-# TEMPORARY (decision D37): there is no authentication yet (P2). Until then every request acts
-# as one fixed development user. P2.6 replaces this whole dependency with real session/API-key
-# auth; `test_dev_user_is_temporary` fails the moment real auth lands so it cannot be forgotten.
-# ------------------------------------------------------------------------------------------
-DEV_USER_EMAIL = "dev@linkforge.local"
-
-
-async def get_current_user(settings: AppSettings, db: DbSession) -> CurrentUser:
-    if settings.env == "prod":
-        # Never let the placeholder act as an identity in production.
-        raise ApiError(401, "unauthorized", "authentication is required")
-
-    stmt = select(User.id, User.email).where(func.lower(User.email) == DEV_USER_EMAIL)
-    row = (await db.execute(stmt)).first()
-    if row is None:
-        # "!" is not a valid password hash, so nobody can ever log in as this user.
-        await db.execute(
-            pg_insert(User).values(email=DEV_USER_EMAIL, password_hash="!").on_conflict_do_nothing()
-        )
-        await db.commit()
-        row = (await db.execute(stmt)).one()
-    return CurrentUser(id=row.id, email=row.email)
-
-
-AuthUser = Annotated[CurrentUser, Depends(get_current_user)]
-
 
 # ------------------------------------------------------------------------------------------
-# Real authentication by session cookie (P2.4). It is used by /auth/me and /auth/logout now;
-# P2.6 makes it (plus API keys) the identity for every endpoint and removes the dev user above.
+# Authentication. A request is authenticated by a session cookie (P2.4); API keys join in P2.7.
+# `get_current_user` is the identity of every protected endpoint; the dev user of P1 is gone.
 # ------------------------------------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
 class SessionContext:
@@ -112,8 +84,8 @@ def _unavailable() -> ApiError:
     return ApiError(503, "unavailable", "the service is temporarily unavailable")
 
 
-async def get_session_context(
-    request: Request, db: DbSession, sessions: Sessions, now: Now
+async def resolve_session(
+    request: Request, db: AsyncSession, sessions: SessionStore, now: datetime
 ) -> SessionContext:
     """Who is logged in? Raises 401 (and clears both cookies) for a missing, malformed, expired,
     revoked or orphaned session, and 503 if Redis or Postgres cannot answer: an outage must not
@@ -145,7 +117,26 @@ async def get_session_context(
     )
 
 
+async def get_session_context(
+    request: Request, db: DbSession, sessions: Sessions, now: Now
+) -> SessionContext:
+    """Session-only identity (for endpoints that must NOT accept an API key, e.g. managing keys)."""
+    return await resolve_session(request, db, sessions, now)
+
+
 SessionAuth = Annotated[SessionContext, Depends(get_session_context)]
+
+
+async def get_current_user(
+    request: Request, db: DbSession, sessions: Sessions, now: Now
+) -> CurrentUser:
+    """Identity for the protected endpoints. 401 if not logged in; for state-changing requests
+    the CSRF token and Origin are checked inside `resolve_session`."""
+    ctx = await resolve_session(request, db, sessions, now)
+    return CurrentUser(id=ctx.user_id, email=ctx.email)
+
+
+AuthUser = Annotated[CurrentUser, Depends(get_current_user)]
 
 
 def origin_guard(request: Request) -> None:

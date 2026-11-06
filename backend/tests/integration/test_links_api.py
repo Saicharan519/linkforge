@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.models import ClickEvent, Link, LinkDailyStat, User
 from tests.conftest import TEST_DATABASE_URL
-from tests.integration.conftest import ApiAs, client_for
+from tests.integration.conftest import ApiAs
 from tests.integration.factories import make_link, make_user, new_click
 
 NOW = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)  # the pinned "current time" for these tests
@@ -502,37 +502,6 @@ async def test_other_users_links_are_invisible_and_untouchable(
     await db.refresh(theirs)  # unchanged and still there
     assert theirs.title == "Private"
     assert mine.user_id == owner.id
-
-
-# --- the temporary dev user (D37) -------------------------------------------------------------
-
-
-async def test_dev_user_owns_links_until_real_auth(db: AsyncSession) -> None:
-    """With no identity override, requests act as one fixed development user."""
-    async with client_for(Settings()) as c:
-        a = await c.post("/api/v1/links", json={"destination_url": URL, "alias": "dev0001"})
-        b = await c.post("/api/v1/links", json={"destination_url": URL, "alias": "dev0002"})
-    assert (a.status_code, b.status_code) == (201, 201)
-    users = (await db.execute(select(User.email))).scalars().all()
-    assert users == ["dev@linkforge.local"]  # created once, reused
-
-
-async def test_dev_user_refused_in_production() -> None:
-    settings = Settings(database_url=TEST_DATABASE_URL, env="prod")
-    async with client_for(settings) as c:
-        resp = await c.post("/api/v1/links", json={"destination_url": URL})
-    assert resp.status_code == 401 and resp.json()["error"]["code"] == "unauthorized"
-
-
-async def test_dev_user_is_temporary(client) -> None:
-    """TRIPWIRE. Session auth exists since P2.4 (/auth/me, /auth/login) but the links endpoints
-    still act as the temporary dev user until P2.6, so a request with NO credentials works.
-
-    When P2.6 switches the links endpoints to real session/API-key auth this test FAILS: that is
-    the reminder to delete the dev-user dependency in app/api/deps.py (decision D37) and this test.
-    """
-    resp = await client.post("/api/v1/links", json={"destination_url": URL})
-    assert resp.status_code == 201
 
 
 # --- the error shape (D30) --------------------------------------------------------------------
