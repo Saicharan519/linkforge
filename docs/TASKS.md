@@ -79,7 +79,7 @@ DevOps pointer: none. Be able to explain ARCH §8.
 - ☑ P3.2 (D66; UA parsing is still a placeholder until P3.4) Worker per ARCH §2.3: group creation, batch with orphan pre-filter, idempotent insert, rollups, ack-after-commit. *Test:* duplicate event → 1 row; batch containing one orphan → others stored.
 - ☑ P3.3 (D67) Per-event fallback, XAUTOCLAIM, extended-XPENDING poison detection, dead-letter (ack only after dead XADD succeeds), graceful SIGTERM; group created at `0` and re-created on NOGROUP. No replay command (D18; manual runbook). *Test:* **commit-then-crash-before-XACK → redelivery → still exactly one row and +1 count (D9)**; kill mid-batch → no double count; poison → dead stream; dead XADD failure → stays pending; NOGROUP after Redis wipe → worker recovers; events XADDed before the group existed are processed.
 - ☑ P3.4 (D68) UA parsing + bot flag. *Test:* sample UAs.
-- ☐ P3.5 Analytics endpoints (UTC `YYYY-MM-DD` labels, zero-fill, range semantics). *Test:* boundaries incl. partial today.
+- ☑ P3.5 (D69) Analytics endpoints (UTC `YYYY-MM-DD` labels, zero-fill, range semantics). *Test:* boundaries incl. partial today.
 - ☐ P3.6 Metrics: all names in ARCH §7 incl. `click_stream_lag/pending/length`; API metrics on :9101, worker :9100; JSON logs + request ID. *Test:* scrape shows every metric name.
 Done when: tests pass; `curl localhost:9101/metrics` and `:9100/metrics` show the full list; stopping the worker makes lag/pending grow and restarting drains them.
 Prompt:
