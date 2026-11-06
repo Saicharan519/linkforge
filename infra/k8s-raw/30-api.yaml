@@ -1,0 +1,103 @@
+# The API: a Deployment (the pods) plus a Service (the stable address in front of them).
+#
+# Deployment -> ReplicaSet -> Pods. You declare "I want 2 pods of this image"; the Deployment
+# controller creates a ReplicaSet, which creates the pods and replaces any that die. A change to
+# the pod template (e.g. a new image tag) creates a NEW ReplicaSet and shifts pods over gradually:
+# a rolling update.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: linkforge
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api # the Deployment manages pods that carry this label
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Start one NEW pod first, and never take an old one away until the new one is Ready.
+      # This is why a broken release (bad tag, failing readiness probe) leaves the OLD pods
+      # serving: the proof-3 drill of this phase.
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/saicharan519/linkforge-api:sha-f3a5d2f # throwaway pin, see 20-migrate-job.yaml
+          imagePullPolicy: IfNotPresent # tags are never re-used (sha-<commit>), so cached is correct
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: linkforge-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: linkforge-db
+                  key: DATABASE_URL
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true # verified: the image runs fine with a read-only filesystem
+            capabilities:
+              drop: ["ALL"]
+          # /healthz = "the process is alive" (no dependencies checked). /readyz = "can serve":
+          # it checks Postgres. Keeping them separate matters: if Postgres is down, readiness
+          # fails and traffic stops, but liveness still passes, so pods are NOT restart-looped
+          # for a problem a restart cannot fix.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources: # budget from ARCHITECTURE §9.3
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+---
+# A Service gives a set of pods ONE stable name and virtual IP and load-balances across the READY
+# ones. Pods come and go and change IPs; the Service name "api" does not. Inside the cluster
+# anything can call http://api:8000 (the Ingress does exactly that).
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: linkforge
+spec:
+  type: ClusterIP # reachable only from inside the cluster
+  selector:
+    app: api # "send traffic to every Ready pod with this label"
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http # the container port NAME defined above

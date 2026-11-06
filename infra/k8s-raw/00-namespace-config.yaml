@@ -1,0 +1,30 @@
+# THROWAWAY learning manifests (P1S.4b): the same application as the Helm chart in
+# linkforge-gitops, written out by hand so you can see every Kubernetes object. They are deleted
+# once the chart reproduces them (P1S.4c). Walkthrough: docs/RUNBOOK-k8s-raw.md
+#
+# Apply order is the file-name order: namespace + config first, the database before the things
+# that need it, the Ingress last.
+
+# A Namespace is a folder for objects. Everything of ours lives in "linkforge", so one command
+# (kubectl delete namespace linkforge) removes the lot.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: linkforge
+---
+# A ConfigMap holds NON-secret settings. Pods receive them as environment variables
+# (envFrom below). The app reads exactly these names (backend/app/config.py, pydantic-settings).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: linkforge-config
+  namespace: linkforge
+data:
+  # "dev" keeps the temporary dev user (decision D37): there is no login until P2. The app refuses
+  # that user when ENV=prod, so this is only acceptable because the cluster is local.
+  ENV: "dev"
+  LOG_LEVEL: "INFO"
+  # What short links look like in API responses. Goes through the Ingress, host go.localtest.me.
+  SHORT_URL_BASE: "http://go.localtest.me"
+# NOTE: the Secret with the database password is deliberately NOT in this file (or in git). You
+# create it by hand in the runbook with `kubectl create secret generic linkforge-db ...`.

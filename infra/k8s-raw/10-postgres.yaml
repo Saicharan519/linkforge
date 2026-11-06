@@ -1,0 +1,134 @@
+# PostgreSQL on kind. In the cloud this is RDS instead (ARCHITECTURE §3); locally we run the
+# official image ourselves, in a StatefulSet.
+#
+# Why StatefulSet and not Deployment: a database needs a STABLE identity (postgres-0, always the
+# same name) and its OWN disk that survives pod restarts and re-attaches to the same pod. A
+# Deployment's pods are interchangeable and disposable, which is exactly wrong for a database.
+
+# "Headless" Service (clusterIP: None): no virtual IP, DNS simply returns the pod's own address.
+# That is what gives a StatefulSet pod the stable DNS name postgres-0.postgres. Our API reaches
+# the database at the name "postgres" (see DATABASE_URL in the runbook).
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: linkforge
+  labels:
+    app: postgres
+spec:
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: linkforge
+spec:
+  serviceName: postgres # the headless Service above
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      # This pod never talks to the Kubernetes API, so do not hand it a credential for it.
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60 # let Postgres shut down cleanly (flush, checkpoint)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999 # the "postgres" user inside the official image
+        runAsGroup: 999
+        # Kubernetes makes the mounted disk group-owned by 999 and group-writable, otherwise a
+        # non-root Postgres could not write to a freshly created volume.
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault # block the rarely used, dangerous system calls
+      containers:
+        - name: postgres
+          # Tag AND digest, as in our Dockerfiles. Same version as docker-compose.yml.
+          image: postgres:16.4@sha256:e62fbf9d3e2b49816a32c400ed2dba83e3b361e6833e624024309c35d334b412
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: linkforge
+            - name: POSTGRES_DB
+              value: linkforge
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: # read from the Secret you create by hand
+                  name: linkforge-db
+                  key: POSTGRES_PASSWORD
+            # A sub-directory of the mount: a freshly formatted volume contains "lost+found",
+            # and Postgres refuses to initialise inside a directory that is not empty.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            # Read-only root filesystem (below) means Postgres needs a writable place for its
+            # socket and temp files. emptyDir = scratch space that lives as long as the pod.
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # PROBES: how Kubernetes decides what is going on inside the container.
+          #  startup   : "has it finished booting?" Until it passes, the other two do not run.
+          #  readiness : "should it receive traffic?" Failing => removed from the Service, NOT restarted.
+          #  liveness  : "is it stuck?" Failing => the container is KILLED and restarted.
+          startupProbe:
+            exec:
+              command: ["pg_isready", "-U", "linkforge", "-d", "linkforge"]
+            periodSeconds: 3
+            failureThreshold: 20 # up to 60 s to start
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "linkforge", "-d", "linkforge"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "linkforge", "-d", "linkforge"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6 # tolerate a slow minute before killing a database
+          # REQUESTS = what the scheduler reserves for the pod. LIMITS = hard ceiling: above the
+          # memory limit the container is OOM-killed, above the CPU limit it is throttled.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+  # Each pod gets its OWN PersistentVolumeClaim (a request for disk) created from this template.
+  # kind's default storage class provisions a directory on the node for it. The data therefore
+  # survives `kubectl delete pod postgres-0` but NOT deleting the cluster.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

@@ -1,0 +1,59 @@
+# Ingress = routing rules at the edge: "requests for host X and path Y go to Service Z".
+# The Traefik controller (installed in P1S.4a) reads these objects and does the forwarding.
+# "localtest.me" is a public DNS name that always resolves to 127.0.0.1, so your browser sends the
+# right Host header with no /etc/hosts edits. Traefik picks the rule by that Host header.
+#
+# Two hosts, two Ingresses (ARCHITECTURE §1): the app host and the public short-link host are
+# kept separate so they can be locked down differently later.
+
+# ---- app.localtest.me: the web app. /api goes to the API, everything else to the frontend ----
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app
+  namespace: linkforge
+spec:
+  ingressClassName: traefik # which controller owns this Ingress (on EKS this will be "alb")
+  rules:
+    - host: app.localtest.me
+      http:
+        paths:
+          # Longest matching prefix wins, so /api/... goes to the API even though "/" matches too.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  name: http
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  name: http
+---
+# ---- go.localtest.me: the PUBLIC short-link host. Only the API's http port is ever behind it ----
+# (The metrics port will never be in any Ingress.)
+# KNOWN GAP (decision D50): the invariant "this host serves only GET/HEAD /{code}" is enforced
+# by the app (PUBLIC_REDIRECT_HOST), which does not exist before P2. Until then this host
+# forwards every path to the API.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: go
+  namespace: linkforge
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: go.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  name: http

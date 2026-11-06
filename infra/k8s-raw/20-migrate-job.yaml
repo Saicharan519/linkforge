@@ -1,0 +1,60 @@
+# Database migration: runs `alembic upgrade head` ONCE, then exits. Same image as the API, a
+# different command (the same idea as the "migrate" service in docker-compose.yml).
+#
+# A Job runs a pod "to completion" instead of keeping it alive forever like a Deployment.
+# If Postgres is not accepting connections yet, the migration fails; the Job then simply starts a
+# fresh pod (backoffLimit) until it succeeds. That retry loop is the "wait for the database".
+#
+# In the Helm chart this becomes an Argo CD sync hook so it runs after Postgres and before the
+# API (ARCHITECTURE §11). Here you simply apply it after Postgres is Ready.
+#
+# A Job's pod template cannot be changed once created. To run it again: delete it first
+# (kubectl -n linkforge delete job migrate), then apply.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  namespace: linkforge
+spec:
+  backoffLimit: 6 # retries before the Job is declared Failed
+  activeDeadlineSeconds: 300 # give up entirely after 5 minutes
+  template:
+    metadata:
+      labels:
+        app: migrate
+    spec:
+      restartPolicy: Never # failed pod is kept (for `kubectl logs`); a NEW pod is created for a retry
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001 # the "app" user baked into our image (backend/Dockerfile)
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          # Image built and pushed by CI (build-push.yml). Throwaway: the chart reads this tag
+          # from linkforge-gitops/envs/kind/values.yaml instead.
+          image: ghcr.io/saicharan519/linkforge-api:sha-f3a5d2f
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: linkforge-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: linkforge-db
+                  key: DATABASE_URL
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
