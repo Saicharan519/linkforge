@@ -41,6 +41,11 @@ expand/contract rule).
 job/migrate`, the new image reached the cluster before a chart that gives the Job the secret: push
 the chart (step 2) and refresh Argo; the old API pods keep serving meanwhile, nothing is lost.
 
+**Local port numbers.** If `docker compose` is running on this machine it already publishes
+9101 (API metrics) and 9100 (worker metrics) on localhost, so a port-forward to the same numbers
+would clash, or worse, `curl localhost:9101` would show the COMPOSE stack and not the cluster.
+This runbook therefore forwards the cluster to **9102** (API) and **9200** (worker).
+
 ## 1. Create the secret key (by hand, never in git, never pasted anywhere)
 
 The value is generated in YOUR terminal and goes straight into the cluster; I never see it.
@@ -97,10 +102,10 @@ Expect two new `api-...` pods, `1/1 Running`, and the migrate Job re-run (as wit
 Then look at the API's metrics through a port-forward (second terminal):
 
 ```bash
-kubectl -n linkforge port-forward svc/api 9101:9101
+kubectl -n linkforge port-forward svc/api 9102:9101
 ```
 ```bash
-curl -s localhost:9101/metrics | grep -E '^(http_requests_total|click_stream_)' | head
+curl -s localhost:9102/metrics | grep -E '^(http_requests_total|click_stream_)' | head
 ```
 Expect `click_stream_length`, `click_stream_lag` and `click_stream_pending` (all `0.0` for a fresh
 stream) and some `http_requests_total{...}` lines with the route `/api/v1/auth/...` or `/readyz`.
@@ -152,10 +157,10 @@ only: the `token=SECRET` part is gone), device `desktop`, browser `Chrome`.
 The same numbers from the worker's side (second terminal, port-forward to the worker):
 
 ```bash
-kubectl -n linkforge port-forward svc/worker 9100:9100
+kubectl -n linkforge port-forward svc/worker 9200:9100
 ```
 ```bash
-curl -s localhost:9100/metrics | grep -E '^(click_events_processed_total|click_stream_)'
+curl -s localhost:9200/metrics | grep -E '^(click_events_processed_total|click_stream_)'
 ```
 Expect `click_events_processed_total{status="ok"}` of at least 4 and `click_stream_lag 0.0`.
 
@@ -179,7 +184,7 @@ kubectl -n linkforge scale deploy/worker --replicas=0
 Argo's self-heal will put it back to 1 within moments: that is itself the lesson. To watch lag
 grow you need the worker gone for longer, so turn it off the GitOps way: set `enabled: false`
 again in `envs/kind/values.yaml`, push, refresh, wait for the worker pod to disappear, click the
-link 10 times, and read the gauge on the API port (`curl -s localhost:9101/metrics | grep
+link 10 times, and read the gauge on the API port (`curl -s localhost:9102/metrics | grep
 click_stream_lag`): expect about `10.0`. Then set `enabled: true`, push, refresh: the lag drains to
 `0.0` within seconds and the analytics total grows by 10.
 
