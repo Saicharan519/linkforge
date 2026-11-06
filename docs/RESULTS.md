@@ -26,9 +26,12 @@ pod Ready, and the total.
 | Pod right after `helm install` (no ordering): migrate Job failed once, then passed | `migrate-5pvsm` Error (DNS name for the headless Service did not exist yet), `migrate-nb524` Completed |
 | Same install under Argo CD with sync waves | Application went straight to `Synced`/`Healthy`; one `migrate-f95lc` pod, `Completed`, no failed pod; `postgres-0` Running before it; `go.localtest.me/Helm01` returned `302` (data survived the handover). Ingress did not stay Progressing (Traefik `ingressEndpoint.ip` change worked) |
 
-Note on proof 2: the scaled-up api pods ended as `Error`, not `Completed`, about 31 s after
-`Terminating` began. That is consistent with the container not exiting on SIGTERM and being
-killed when the 30 s grace period ran out. Not yet investigated.
+Note on proof 2: the scaled-up api pods were removed while still starting (`0/1`) and ended as
+`Error` about 31 s later. Explained and reproduced with Docker (D55): a container's PID 1 ignores
+SIGTERM until the app installs a handler, so a pod killed during Python start-up is only stopped
+by SIGKILL when the grace period ends (exit 137). A READY api container stops in about 0.7 s with
+exit 0 and a clean "Application shutdown complete" log. The Kubernetes-side timing was not
+measured directly.
 
 ## Resource use on kind (validates ARCHITECTURE §9.3 estimates)
 
