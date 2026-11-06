@@ -11,7 +11,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.core.client_ip import client_ip
 from app.core.errors import ApiError
+from app.core.rate_limit import RateLimiter
 from app.core.redis import SafeRedis
 from app.db import get_db
 from app.models import User
@@ -23,6 +25,14 @@ def get_app_settings(request: Request) -> Settings:
 
 def get_redis(request: Request) -> SafeRedis:
     return request.app.state.redis
+
+
+def get_limiter(request: Request) -> RateLimiter:
+    return request.app.state.limiter
+
+
+def get_client_ip(request: Request) -> str:
+    return client_ip(request, request.app.state.settings.trusted_proxy_count)
 
 
 def get_now() -> datetime:
@@ -40,6 +50,8 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 AppSettings = Annotated[Settings, Depends(get_app_settings)]
 Now = Annotated[datetime, Depends(get_now)]
 RedisClient = Annotated[SafeRedis, Depends(get_redis)]
+Limiter = Annotated[RateLimiter, Depends(get_limiter)]
+ClientIp = Annotated[str, Depends(get_client_ip)]
 
 # ------------------------------------------------------------------------------------------
 # TEMPORARY (decision D37): there is no authentication yet (P2). Until then every request acts

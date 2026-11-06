@@ -38,13 +38,22 @@ class Resolved:
 
 
 async def resolve_destination(
-    db: AsyncSession, redis: SafeRedis, settings: Settings, code: str, now: datetime
+    db: AsyncSession,
+    redis: SafeRedis,
+    settings: Settings,
+    code: str,
+    now: datetime,
+    *,
+    redis_ok: bool = True,
 ) -> Resolved:
     """Return the link for `code`, or raise ApiError 404 / 410 / 503.
 
     Status precedence (ARCHITECTURE §2.1): disabled -> 404 (even if also expired), else
     expired -> 410, else redirect. An unknown code and a disabled link look identical (404), so
     visitors cannot tell that a disabled link ever existed.
+
+     means the caller already saw Redis fail on this request (the rate limiter),
+    so every Redis step is skipped and the answer comes from Postgres alone.
     """
     # A code that could never have been created cannot exist. Answering 404 here, without asking
     # Redis or the database, keeps scanners and junk URLs (/favicon.ico, /.env, /a%00b) out of
@@ -54,7 +63,7 @@ async def resolve_destination(
 
     # Step 2: the link cache. A hit is answered without touching Postgres (so a Postgres outage
     # does not break links that are already cached: the accepted trade-off in §2.1).
-    cached = await link_cache.get_cached_link(redis, code)
+    cached = await link_cache.get_cached_link(redis, code) if redis_ok else link_cache.REDIS_FAILED
     redis_healthy = cached is not link_cache.REDIS_FAILED
     if isinstance(cached, dict):
         REDIRECT_CACHE.labels(result="hit").inc()

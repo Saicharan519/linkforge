@@ -21,3 +21,11 @@ REDIRECT_CACHE = Counter(
     "Redirect lookups by cache result",
     ["result"],
 )
+
+# Requests refused with 429 because a limit was exceeded (not Redis failures: those are
+# redis_errors_total). scope = redirect | login | create.
+RATE_LIMIT_REJECTIONS = Counter(
+    "rate_limit_rejections_total",
+    "Requests rejected by a rate limit",
+    ["scope"],
+)

@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from app.api import health, links, redirect
 from app.config import Settings, get_settings
 from app.core.errors import install_error_handlers
+from app.core.rate_limit import RateLimiter
 from app.core.redis import create_redis
 from app.db import create_engine, create_sessionmaker
 
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.sessionmaker = create_sessionmaker(engine)
     # Same rule for Redis: the client connects lazily, so the app boots with Redis down (D56).
     app.state.redis = create_redis(app.state.settings)
+    app.state.limiter = RateLimiter(app.state.redis)
     try:
         yield
     finally:

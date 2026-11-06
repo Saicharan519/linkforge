@@ -258,12 +258,15 @@ async def test_redis_down_redirect_still_302_and_pays_for_one_failed_call_only(
 ) -> None:
     await make_link(db, owner, "nore001", destination_url=OLD)
     settings = Settings(database_url=TEST_DATABASE_URL, redis_url=DEAD_REDIS)
-    before = {op: redis_errors(op) for op in ("cache_get", "neg_get", "cache_set")}
+    ops = ("ratelimit", "cache_get", "neg_get", "cache_set")
+    before = {op: redis_errors(op) for op in ops}
     async with api_as(owner, now=NOW, settings=settings) as (_, client):
         resp = await client.get("/nore001")
     assert (resp.status_code, resp.headers["location"]) == (302, OLD)
-    assert redis_errors("cache_get") == before["cache_get"] + 1
-    # Once Redis has failed in a request, its remaining steps are skipped, not retried.
+    # The rate limiter is the first Redis call and it failed (open); every later Redis step of the
+    # same request is skipped, not retried.
+    assert redis_errors("ratelimit") == before["ratelimit"] + 1
+    assert redis_errors("cache_get") == before["cache_get"]
     assert redis_errors("neg_get") == before["neg_get"]
     assert redis_errors("cache_set") == before["cache_set"]
 
@@ -349,10 +352,12 @@ async def test_unreadable_cache_entry_is_treated_as_a_miss_and_repaired(
     assert json.loads(await raw.get("link:bad0001") or "{}") == {"id": str(link.id), "url": OLD}
 
 
-async def test_junk_codes_never_reach_redis_or_postgres(
+async def test_junk_codes_never_reach_the_cache_or_postgres(
     api_as: ApiAs, owner: User, raw: aioredis.Redis
 ) -> None:
     async with api_as(owner, now=NOW) as (_, client):
         assert (await client.get("/favicon.ico")).status_code == 404
         assert (await client.get("/a%00b")).status_code == 404
-    assert await raw.keys("*") == []
+    # Only the rate-limit counter (junk traffic counts against the limit, on purpose): nothing
+    # was cached for the junk codes.
+    assert await raw.keys("link:*") == [] and await raw.keys("neg:*") == []

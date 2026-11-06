@@ -66,4 +66,8 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
 # ONE uvicorn process per container (decision D15): we scale by running more containers/pods,
 # and per-process metrics assume it. Exec form (a JSON list) so uvicorn is PID 1 and receives
 # SIGTERM directly, which lets it finish in-flight requests when Kubernetes stops the pod.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+#
+# --no-proxy-headers: uvicorn would otherwise rewrite the client address from X-Forwarded-For for
+# peers in its allow-list (default 127.0.0.1). The ONLY code allowed to interpret that header is
+# app/core/client_ip.py (TRUSTED_PROXY_COUNT rule, ARCHITECTURE §6.3); no second, hidden rule.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]

@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     # Never longer than the link's own expiry; jittered +-10% but never above this value.
     link_cache_ttl_seconds: int = 300
 
+    # Rate limits (ARCHITECTURE §5, §9.1). All from the environment so a load test can raise them.
+    rate_limit_redirect_per_min: int = 120  # per client IP; fails open
+    rate_limit_create_per_min: int = 30  # per user; fails closed (wired in P2.7)
+    rate_limit_login_max: int = 5  # per IP+email per 15 minutes; fails closed (wired in P2.4)
+    # How many reverse proxies of ours sit in front of the API; see core/client_ip.py.
+    # 0 = none (local), 1 = Traefik on kind or the ALB on EKS.
+    trusted_proxy_count: int = 0
+
     # OpenAPI docs are served at /api/docs only when this is true (dev only).
     enable_docs: bool = False
 
