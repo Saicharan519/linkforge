@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.core.errors import ApiError
+from app.core.redis import SafeRedis
 from app.core.shortcode import (
     InvalidAlias,
     is_code_collision,
@@ -22,6 +23,7 @@ from app.core.shortcode import (
 from app.core.urls import InvalidUrl, validate_destination_url
 from app.models import Link, LinkDailyStat
 from app.schemas.link import LinkCreate, LinkList, LinkOut, LinkPatch, LinkStatus
+from app.services import link_cache
 
 Problems = list[tuple[str, str]]  # (field, message) pairs for a 422
 
@@ -103,7 +105,12 @@ def _check_expiry(expires_at: datetime | None, now: datetime) -> Problems:
 
 
 async def create_link(
-    db: AsyncSession, user_id: uuid.UUID, body: LinkCreate, settings: Settings, now: datetime
+    db: AsyncSession,
+    redis: SafeRedis,
+    user_id: uuid.UUID,
+    body: LinkCreate,
+    settings: Settings,
+    now: datetime,
 ) -> LinkOut:
     problems = _check_url(body.destination_url, settings) + _check_expiry(body.expires_at, now)
     if body.alias is not None:
@@ -141,7 +148,9 @@ async def create_link(
 
     await db.commit()
     await db.refresh(link)
-    # P2.2 will also delete the cache keys link:{code} and neg:{code} here, after the commit.
+    # After the commit: a visitor may have asked for this code a moment ago and left a "does not
+    # exist" entry (neg:{code}) that would keep answering 404 for up to a minute.
+    await link_cache.invalidate(redis, link.code)
     return _to_out(link, 0, settings, now)
 
 
@@ -212,6 +221,7 @@ async def get_link(
 
 async def update_link(
     db: AsyncSession,
+    redis: SafeRedis,
     user_id: uuid.UUID,
     link_id: uuid.UUID,
     body: LinkPatch,
@@ -241,7 +251,9 @@ async def update_link(
         link.expires_at = body.expires_at  # None clears it
     link.updated_at = now  # no DB trigger: the service sets it on every PATCH (D34)
     await db.commit()
-    # P2.2 will also delete the cache keys link:{code} and neg:{code} here, after the commit.
+    # After the commit (never before, or a reader could refill the cache from the old row).
+    # Any PATCH invalidates: destination, is_active and expires_at all change what a redirect does.
+    await link_cache.invalidate(redis, link.code)
 
     totals = await _total_clicks(db, [link.id])
     return _to_out(link, totals.get(link.id, 0), settings, now)
@@ -250,9 +262,15 @@ async def update_link(
 # --- delete ---------------------------------------------------------------------------------
 
 
-async def delete_link(db: AsyncSession, user_id: uuid.UUID, link_id: uuid.UUID) -> None:
-    result = await db.execute(delete(Link).where(Link.id == link_id, Link.user_id == user_id))
-    if result.rowcount == 0:
+async def delete_link(
+    db: AsyncSession, redis: SafeRedis, user_id: uuid.UUID, link_id: uuid.UUID
+) -> None:
+    # RETURNING gives us the code, which the cache keys are named after.
+    result = await db.execute(
+        delete(Link).where(Link.id == link_id, Link.user_id == user_id).returning(Link.code)
+    )
+    code = result.scalar_one_or_none()
+    if code is None:
         raise ApiError(404, "not_found", "link not found")
     await db.commit()  # click_events and link_daily_stats go with it (ON DELETE CASCADE)
-    # P2.2 will also delete the cache keys here, after the commit.
+    await link_cache.invalidate(redis, code)

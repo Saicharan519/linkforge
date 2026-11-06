@@ -15,24 +15,16 @@ import logging
 from collections.abc import Awaitable
 from typing import TypeVar
 
-from prometheus_client import Counter
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from app.config import Settings
+from app.core.metrics import REDIS_ERRORS
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 F = TypeVar("F")
-
-# `op` names follow ARCHITECTURE §2.1 (ratelimit, cache_get, neg_get, cache_set, enqueue, ...).
-# Callers pass a fixed literal, never user input, so the label set stays small.
-REDIS_ERRORS = Counter(
-    "redis_errors_total",
-    "Redis operations that failed or timed out and used their fallback",
-    ["op"],
-)
 
 
 class SafeRedis:

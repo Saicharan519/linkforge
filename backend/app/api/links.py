@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Response
 
-from app.api.deps import AppSettings, AuthUser, DbSession, Now
+from app.api.deps import AppSettings, AuthUser, DbSession, Now, RedisClient
 from app.schemas.link import LinkCreate, LinkList, LinkOut, LinkPatch, LinkStatus
 from app.services import links as service
 
@@ -14,9 +14,14 @@ router = APIRouter(prefix="/api/v1/links", tags=["links"])
 
 @router.post("", status_code=201)
 async def create_link(
-    body: LinkCreate, db: DbSession, user: AuthUser, settings: AppSettings, now: Now
+    body: LinkCreate,
+    db: DbSession,
+    redis: RedisClient,
+    user: AuthUser,
+    settings: AppSettings,
+    now: Now,
 ) -> LinkOut:
-    return await service.create_link(db, user.id, body, settings, now)
+    return await service.create_link(db, redis, user.id, body, settings, now)
 
 
 @router.get("")
@@ -47,14 +52,15 @@ async def update_link(
     id: uuid.UUID,
     body: LinkPatch,
     db: DbSession,
+    redis: RedisClient,
     user: AuthUser,
     settings: AppSettings,
     now: Now,
 ) -> LinkOut:
-    return await service.update_link(db, user.id, id, body, settings, now)
+    return await service.update_link(db, redis, user.id, id, body, settings, now)
 
 
 @router.delete("/{id}", status_code=204)
-async def delete_link(id: uuid.UUID, db: DbSession, user: AuthUser) -> Response:
-    await service.delete_link(db, user.id, id)
+async def delete_link(id: uuid.UUID, db: DbSession, redis: RedisClient, user: AuthUser) -> Response:
+    await service.delete_link(db, redis, user.id, id)
     return Response(status_code=204)

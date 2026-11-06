@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     redis_socket_timeout_ms: int = 100
     redis_connect_timeout_ms: int = 200
 
+    # Upper bound for how long the redirect cache may serve a stale value (ARCHITECTURE §2.1.1).
+    # Never longer than the link's own expiry; jittered +-10% but never above this value.
+    link_cache_ttl_seconds: int = 300
+
     # OpenAPI docs are served at /api/docs only when this is true (dev only).
     enable_docs: bool = False
 
