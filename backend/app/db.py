@@ -17,11 +17,14 @@ from app.config import Settings
 CONNECT_TIMEOUT_SECONDS = 3
 
 
-def create_engine(settings: Settings) -> AsyncEngine:
+def create_engine(
+    settings: Settings, *, pool_size: int | None = None, max_overflow: int | None = None
+) -> AsyncEngine:
+    """`pool_size`/`max_overflow` override the API defaults (the worker uses 2 + 1)."""
     return create_async_engine(
         settings.database_url,
-        pool_size=settings.db_pool_size,
-        max_overflow=settings.db_max_overflow,
+        pool_size=settings.db_pool_size if pool_size is None else pool_size,
+        max_overflow=settings.db_max_overflow if max_overflow is None else max_overflow,
         # Test a pooled connection before use, so a restarted Postgres does not cause one failed
         # request per stale connection.
         pool_pre_ping=True,

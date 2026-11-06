@@ -56,6 +56,22 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # The click worker (P3.2): the SAME image as the API, a different command. It reads click events
+  # from the Redis stream and stores them in Postgres. No port: nothing connects to it.
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      disable: true # the image's check probes the API's port; the worker has none
+
   # Placeholder static page (P1S.2); becomes the real SPA in P4/P5.
   frontend:
     build: ./frontend

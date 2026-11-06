@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     # Approximate cap of the click stream: a memory guard, not a delivery promise.
     click_stream_maxlen: int = 100000
 
+    # Click worker (ARCHITECTURE §2.3, §9.1).
+    worker_batch_size: int = 100  # messages read and stored per transaction
+    worker_block_ms: int = 2000  # how long XREADGROUP waits when the stream is empty
+
     # OpenAPI docs are served at /api/docs only when this is true (dev only).
     enable_docs: bool = False
 

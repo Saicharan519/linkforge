@@ -76,7 +76,7 @@ DevOps pointer: none. Be able to explain ARCH §8.
 
 ## P3 — Click pipeline, analytics API, metrics
 - ☑ P3.1 (D65; needs `IP_HASH_SECRET` in the cluster Secret before deploy) `XADD` in redirect (bounded timeout, best effort, drop metric). *Test:* Redis down → 302 + dropped counter.
-- ☐ P3.2 Worker per ARCH §2.3: group creation, batch with orphan pre-filter, idempotent insert, rollups, ack-after-commit. *Test:* duplicate event → 1 row; batch containing one orphan → others stored.
+- ☑ P3.2 (D66; UA parsing is still a placeholder until P3.4) Worker per ARCH §2.3: group creation, batch with orphan pre-filter, idempotent insert, rollups, ack-after-commit. *Test:* duplicate event → 1 row; batch containing one orphan → others stored.
 - ☐ P3.3 Per-event fallback, XAUTOCLAIM, extended-XPENDING poison detection, dead-letter (ack only after dead XADD succeeds), graceful SIGTERM; group created at `0` and re-created on NOGROUP. No replay command (D18; manual runbook). *Test:* **commit-then-crash-before-XACK → redelivery → still exactly one row and +1 count (D9)**; kill mid-batch → no double count; poison → dead stream; dead XADD failure → stays pending; NOGROUP after Redis wipe → worker recovers; events XADDed before the group existed are processed.
 - ☐ P3.4 UA parsing + bot flag. *Test:* sample UAs.
 - ☐ P3.5 Analytics endpoints (UTC `YYYY-MM-DD` labels, zero-fill, range semantics). *Test:* boundaries incl. partial today.
