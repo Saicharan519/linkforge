@@ -1,6 +1,9 @@
 """Schema tests: the migration, and the constraints the application relies on (ARCHITECTURE §3)."""
 
 import asyncio
+import os
+import subprocess
+import sys
 import uuid
 from datetime import UTC, date, datetime
 
@@ -13,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ApiKey, ClickEvent, Link, LinkDailyStat, User
 from tests.conftest import TEST_DATABASE_URL
-from tests.integration.conftest import plain_dsn, run_alembic
+from tests.integration.conftest import BACKEND_DIR, plain_dsn, run_alembic
 from tests.integration.factories import make_link, make_user, new_api_key, new_click
 
 
@@ -73,6 +76,23 @@ async def test_models_match_migration() -> None:
     """`alembic check` fails if the models and the migration have drifted apart."""
     result = await asyncio.to_thread(run_alembic, "check", database_url=TEST_DATABASE_URL)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+async def test_a_migration_needs_nothing_but_the_database_url() -> None:
+    """The migration Job must not need the application's other settings (D72): a real alembic
+    process whose whole environment is PATH and DATABASE_URL (no IP_HASH_SECRET, no REDIS_URL)."""
+    env = {"PATH": os.environ["PATH"], "DATABASE_URL": TEST_DATABASE_URL}
+    for command in (["current"], ["upgrade", "head"], ["check"]):
+        result = await asyncio.to_thread(
+            subprocess.run,
+            [sys.executable, "-m", "alembic", *command],
+            cwd=BACKEND_DIR,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, (command, result.stdout + result.stderr)
 
 
 # --- uniqueness -------------------------------------------------------------------------------

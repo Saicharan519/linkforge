@@ -1,4 +1,4 @@
-"""Alembic environment (async). The database URL comes from the app's Settings (env vars only)."""
+"""Alembic environment (async). Needs ONLY DATABASE_URL (env var), not the app's full Settings."""
 
 import asyncio
 from logging.config import fileConfig
@@ -8,7 +8,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-from app.config import get_settings
+from app.config import DatabaseSettings
 from app.models import Base
 
 config = context.config
@@ -20,9 +20,10 @@ if config.config_file_name is not None:
 # All models are registered on Base.metadata by importing app.models (used by `alembic check`).
 target_metadata = Base.metadata
 
-# One source of truth for the URL: DATABASE_URL. "%" is doubled because Alembic's config parser
-# treats a single "%" as interpolation syntax.
-config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
+# One source of truth for the URL: DATABASE_URL, read through DatabaseSettings so that nothing
+# else is required (a migration must not need the HMAC secret). "%" is doubled because Alembic's
+# config parser treats a single "%" as interpolation syntax.
+config.set_main_option("sqlalchemy.url", DatabaseSettings().database_url.replace("%", "%%"))
 
 
 def run_migrations_offline() -> None:

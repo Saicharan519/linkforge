@@ -11,16 +11,26 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
+class DatabaseSettings(BaseSettings):
+    """The ONE setting a database migration needs.
+
+    Alembic uses this instead of the full `Settings`, so a migration can run with nothing but
+    `DATABASE_URL`: it does not need (and must not be given) the HMAC secret or any other setting
+    of the running application. (It used to load `Settings`, and the click-event image then
+    refused to migrate without `IP_HASH_SECRET`; see decision D72.)
+    """
+
     # extra="ignore": the environment also holds variables for other services (e.g. POSTGRES_USER
     # for docker compose); those must not make the app fail to start.
     model_config = SettingsConfigDict(extra="ignore")
 
-    env: Literal["dev", "test", "prod"] = "dev"
-    log_level: str = "INFO"
-
     # Required, no default: failing fast at startup beats silently connecting to a guessed database.
     database_url: str
+
+
+class Settings(DatabaseSettings):
+    env: Literal["dev", "test", "prod"] = "dev"
+    log_level: str = "INFO"
 
     # Connection budget per API pod = pool + overflow (ARCHITECTURE §9.2).
     db_pool_size: int = 3
