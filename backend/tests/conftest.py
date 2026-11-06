@@ -16,3 +16,6 @@ TEST_REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/15")
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["REDIS_URL"] = TEST_REDIS_URL
 os.environ["ENV"] = "test"
+# A throwaway secret for the click-IP HMAC (the setting is required, 16+ characters).
+TEST_IP_HASH_SECRET = os.environ.get("IP_HASH_SECRET", "test-only-ip-hash-secret-not-for-real-use")
+os.environ["IP_HASH_SECRET"] = TEST_IP_HASH_SECRET

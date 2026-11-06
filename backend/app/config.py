@@ -7,6 +7,7 @@ and no secrets have defaults. Names and defaults follow docs/ARCHITECTURE.md §9
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -57,6 +58,13 @@ class Settings(BaseSettings):
     # this Host, only GET/HEAD /{code} is served and everything else is 404 (core/host_guard.py).
     # Empty (local runs) = no guard.
     public_redirect_host: str = ""
+
+    # Click events (ARCHITECTURE §2.2, §2.3.1). The secret keys the HMAC that replaces every client
+    # IP before it is stored. REQUIRED, no default: a built-in secret would make the hashes
+    # reversible by anyone who has read the code. At least 16 characters.
+    ip_hash_secret: str = Field(min_length=16)
+    # Approximate cap of the click stream: a memory guard, not a delivery promise.
+    click_stream_maxlen: int = 100000
 
     # OpenAPI docs are served at /api/docs only when this is true (dev only).
     enable_docs: bool = False

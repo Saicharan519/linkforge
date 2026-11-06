@@ -4,12 +4,14 @@ This router MUST be included last in create_app(): `/{code}` matches any single-
 registered earlier it would shadow /healthz, /readyz and every other root-level route.
 """
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import RedirectResponse
+from starlette.background import BackgroundTask
 
 from app.api.deps import AppSettings, ClientIp, DbSession, Limiter, Now, RedisClient
 from app.core.errors import ApiError
 from app.core.urls import location_for
+from app.services import clicks
 from app.services.redirect import Resolved, resolve_destination
 
 router = APIRouter(tags=["redirect"])
@@ -43,6 +45,7 @@ async def _resolve(
 @router.get("/{code}", status_code=302)
 async def follow(
     code: str,
+    request: Request,
     db: DbSession,
     redis: RedisClient,
     limiter: Limiter,
@@ -53,7 +56,26 @@ async def follow(
     resolved = await _resolve(code, db, redis, limiter, settings, ip, now)
     # 302 (Found), NEVER 301: browsers cache a 301 permanently, so later visits would skip us
     # (lost analytics) and edits or deletions would never take effect for them.
-    return RedirectResponse(location_for(resolved.destination_url), status_code=302)
+    response = RedirectResponse(location_for(resolved.destination_url), status_code=302)
+
+    # Count the click: ONLY here (a successful GET). HEAD, 404, 410 and 429 never reach this line.
+    # It runs as a background task, i.e. AFTER the redirect has been sent, so a slow Redis can
+    # never make the visitor wait (it is bounded to 100 ms anyway, but nobody should pay it).
+    if resolved.redis_ok:
+        event = clicks.build_event(
+            settings=settings,
+            link_id=resolved.link_id,
+            code=code,
+            ip=ip,
+            user_agent=request.headers.get("user-agent"),
+            referer=request.headers.get("referer"),
+            now=now,
+        )
+        response.background = BackgroundTask(clicks.enqueue_click, redis, settings, event)
+    else:
+        # Redis already failed on this request: we do not queue, but the click is still lost.
+        clicks.count_dropped()
+    return response
 
 
 # FastAPI does not add HEAD to a GET route automatically, so it is declared explicitly. HEAD gets

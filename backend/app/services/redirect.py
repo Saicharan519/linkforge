@@ -35,6 +35,8 @@ class Resolved:
 
     link_id: UUID
     destination_url: str
+    # False if Redis already failed on this request, so queueing the click would be pointless.
+    redis_ok: bool = True
 
 
 async def resolve_destination(
@@ -67,7 +69,7 @@ async def resolve_destination(
     redis_healthy = cached is not link_cache.REDIS_FAILED
     if isinstance(cached, dict):
         REDIRECT_CACHE.labels(result="hit").inc()
-        return Resolved(link_id=UUID(cached["id"]), destination_url=cached["url"])
+        return Resolved(link_id=UUID(cached["id"]), destination_url=cached["url"], redis_ok=True)
 
     # Step 3: the negative cache. Skipped when step 2 already showed Redis is unhealthy: the next
     # calls would just spend another timeout each, and every Redis step has a fallback anyway
@@ -106,4 +108,4 @@ async def resolve_destination(
         await link_cache.cache_link(
             redis, settings, code, row.id, row.destination_url, row.expires_at, now
         )
-    return Resolved(link_id=row.id, destination_url=row.destination_url)
+    return Resolved(link_id=row.id, destination_url=row.destination_url, redis_ok=redis_healthy)

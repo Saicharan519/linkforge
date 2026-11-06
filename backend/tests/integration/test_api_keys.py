@@ -176,6 +176,13 @@ async def test_list_shows_only_my_keys_newest_first(
 ) -> None:
     first = await new_key(browser, "first")
     second = await new_key(browser, "second")
+    # Two creations can land within the same clock tick under load; make the order unambiguous.
+    for key, minutes_ago in ((first, 2), (second, 1)):
+        await db.execute(
+            update(ApiKey)
+            .where(ApiKey.id == key["id"])
+            .values(created_at=datetime.now(UTC) - timedelta(minutes=minutes_ago))
+        )
     db.add(ApiKey(user_id=bob.id, name="bobs", prefix="BOBPREFX", key_hash="h"))
     await db.commit()
     listing = (await browser.get(KEYS)).json()

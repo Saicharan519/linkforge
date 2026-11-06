@@ -18,6 +18,9 @@ x-backend: &backend
     # Pages allowed to make state-changing requests with a session cookie (CSRF Origin check):
     # the compose UI on :8080 and the Vite dev server on :5173. Empty would allow nothing.
     ALLOWED_ORIGINS: http://localhost:8080,http://localhost:5173
+    # Keys the HMAC that replaces every client IP before it is stored (click events). A throwaway
+    # value for local use only; real environments take it from a Secret. 16+ characters.
+    IP_HASH_SECRET: ${IP_HASH_SECRET:-local-dev-only-ip-hash-secret}
     # Hostname of the PUBLIC short-link host. Empty = no host guard (everything served on any host).
     # To try the guard locally: PUBLIC_REDIRECT_HOST=go.example.com docker compose up -d api
     PUBLIC_REDIRECT_HOST: ${PUBLIC_REDIRECT_HOST:-}

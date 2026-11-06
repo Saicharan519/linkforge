@@ -29,3 +29,10 @@ RATE_LIMIT_REJECTIONS = Counter(
     "Requests rejected by a rate limit",
     ["scope"],
 )
+
+# Clicks queued on the Redis stream, and clicks lost because Redis could not take them (the
+# redirect still succeeded). Their gap to click_events_processed_total (worker) is the loss.
+CLICKS_ENQUEUED = Counter("click_events_enqueued_total", "Click events added to the stream")
+CLICKS_DROPPED = Counter(
+    "click_events_dropped_total", "Click events not queued because Redis failed or was unreachable"
+)
