@@ -12,6 +12,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core import cookies
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +27,7 @@ class ApiError(Exception):
         message: str,
         details: list[dict[str, str]] | None = None,
         headers: dict[str, str] | None = None,
+        clear_session_cookies: bool = False,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
@@ -32,6 +35,13 @@ class ApiError(Exception):
         self.message = message
         self.details = details
         self.headers = headers
+        # Starlette cannot put two Set-Cookie headers in a plain dict, so the handler adds them.
+        self.clear_session_cookies = clear_session_cookies
+
+    @classmethod
+    def unauthorized(cls, message: str = "authentication is required") -> "ApiError":
+        """401 that also clears both auth cookies (missing/malformed/expired/revoked session)."""
+        return cls(401, "unauthorized", message, clear_session_cookies=True)
 
     @classmethod
     def validation(cls, problems: list[tuple[str, str]]) -> "ApiError":
@@ -56,11 +66,14 @@ def error_body(
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def handle_api_error(request: Request, exc: ApiError) -> JSONResponse:
-        return JSONResponse(
+        response = JSONResponse(
             status_code=exc.status_code,
             content=error_body(exc.code, exc.message, exc.details),
             headers=exc.headers,
         )
+        if exc.clear_session_cookies:
+            cookies.clear_session_cookies(response, request.app.state.settings)
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(

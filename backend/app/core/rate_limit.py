@@ -34,6 +34,16 @@ end
 return count
 """
 
+# KEYS[1] = counter key. Takes one attempt back, but never below zero and never on a missing key
+# (a plain DECR would create a key with no expiry).
+_LUA_REFUND = """
+local value = redis.call('GET', KEYS[1])
+if value and tonumber(value) > 0 then
+  return redis.call('DECR', KEYS[1])
+end
+return 0
+"""
+
 _FAILED = object()
 
 
@@ -46,6 +56,20 @@ class RateLimiter:
         # redis-py sends EVALSHA and transparently re-loads the script if Redis forgot it
         # (after a restart without persistence), so a flushed script cache is not an error.
         return self._redis.client.register_script(_LUA)
+
+    @cached_property
+    def _refund_script(self) -> AsyncScript:
+        return self._redis.client.register_script(_LUA_REFUND)
+
+    async def refund(
+        self, scope: str, identifier: str, *, window_seconds: int, now_epoch: float
+    ) -> None:
+        """Give back one counted attempt (a successful login does not count as a failure).
+
+        Best effort: if Redis fails the attempt simply stays counted.
+        """
+        key = f"rl:{scope}:{identifier}:{int(now_epoch // window_seconds)}"
+        await self._redis.call("ratelimit_refund", self._refund_script(keys=[key]), None)
 
     async def enforce(
         self,

@@ -525,13 +525,14 @@ async def test_dev_user_refused_in_production() -> None:
 
 
 async def test_dev_user_is_temporary(client) -> None:
-    """TRIPWIRE. Real auth does not exist yet, so /auth/me is unknown.
+    """TRIPWIRE. Session auth exists since P2.4 (/auth/me, /auth/login) but the links endpoints
+    still act as the temporary dev user until P2.6, so a request with NO credentials works.
 
-    When P2 adds the auth routes this test FAILS: that is the reminder to delete the dev-user
-    dependency in app/api/deps.py (P2.6, decision D37) and this test.
+    When P2.6 switches the links endpoints to real session/API-key auth this test FAILS: that is
+    the reminder to delete the dev-user dependency in app/api/deps.py (decision D37) and this test.
     """
-    resp = await client.get("/api/v1/auth/me")
-    assert resp.status_code == 404
+    resp = await client.post("/api/v1/links", json={"destination_url": URL})
+    assert resp.status_code == 201
 
 
 # --- the error shape (D30) --------------------------------------------------------------------

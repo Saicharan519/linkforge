@@ -8,8 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import ApiKey, ClickEvent, Link, User
 
 
-async def make_user(db: AsyncSession, email: str = "user@example.com") -> User:
-    user = User(email=email, password_hash="not-a-real-hash")  # schema tests need no real hash
+async def make_user(
+    db: AsyncSession,
+    email: str = "user@example.com",
+    password_hash: str = "not-a-real-hash",
+    **f: object,
+) -> User:
+    # Most tests need no real hash. Auth tests pass a real one (hashing once is much faster than
+    # registering through the API in every test).
+    user = User(email=email, password_hash=password_hash, **f)
     db.add(user)
     await db.commit()
     return user

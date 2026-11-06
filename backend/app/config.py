@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # 0 = none (local), 1 = Traefik on kind or the ALB on EKS.
     trusted_proxy_count: int = 0
 
+    # Sessions and cookies (ARCHITECTURE §2.4, §6.1). Secure cookies need HTTPS: on in production.
+    session_ttl_seconds: int = 604800  # 7 days, sliding
+    cookie_secure: bool = False
+
     # OpenAPI docs are served at /api/docs only when this is true (dev only).
     enable_docs: bool = False
 

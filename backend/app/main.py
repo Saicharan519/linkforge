@@ -6,11 +6,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import health, links, redirect
+from app.api import auth, health, links, redirect
 from app.config import Settings, get_settings
 from app.core.errors import install_error_handlers
+from app.core.passwords import PasswordService
 from app.core.rate_limit import RateLimiter
 from app.core.redis import create_redis
+from app.core.sessions import SessionStore
 from app.db import create_engine, create_sessionmaker
 
 
@@ -24,6 +26,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Same rule for Redis: the client connects lazily, so the app boots with Redis down (D56).
     app.state.redis = create_redis(app.state.settings)
     app.state.limiter = RateLimiter(app.state.redis)
+    app.state.sessions = SessionStore(app.state.redis, app.state.settings.session_ttl_seconds)
+    app.state.passwords = PasswordService()  # argon2, at most 2 hashes at once (D10)
     try:
         yield
     finally:
@@ -48,6 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     install_error_handlers(app)
     app.include_router(health.router)
+    app.include_router(auth.router)
     app.include_router(links.router)
     # The redirect router `/{code}` must be included LAST: it matches any single-segment path and
     # would otherwise shadow every other root-level route (test_routes_not_shadowed_by_redirect).

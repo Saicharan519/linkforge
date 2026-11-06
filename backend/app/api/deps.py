@@ -8,13 +8,17 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.core.client_ip import client_ip
+from app.core.cookies import SESSION_COOKIE
 from app.core.errors import ApiError
+from app.core.passwords import PasswordService
 from app.core.rate_limit import RateLimiter
 from app.core.redis import SafeRedis
+from app.core.sessions import SID_PATTERN, Session, SessionStore
 from app.db import get_db
 from app.models import User
 
@@ -29,6 +33,14 @@ def get_redis(request: Request) -> SafeRedis:
 
 def get_limiter(request: Request) -> RateLimiter:
     return request.app.state.limiter
+
+
+def get_sessions(request: Request) -> SessionStore:
+    return request.app.state.sessions
+
+
+def get_passwords(request: Request) -> PasswordService:
+    return request.app.state.passwords
 
 
 def get_client_ip(request: Request) -> str:
@@ -52,6 +64,8 @@ Now = Annotated[datetime, Depends(get_now)]
 RedisClient = Annotated[SafeRedis, Depends(get_redis)]
 Limiter = Annotated[RateLimiter, Depends(get_limiter)]
 ClientIp = Annotated[str, Depends(get_client_ip)]
+Sessions = Annotated[SessionStore, Depends(get_sessions)]
+Passwords = Annotated[PasswordService, Depends(get_passwords)]
 
 # ------------------------------------------------------------------------------------------
 # TEMPORARY (decision D37): there is no authentication yet (P2). Until then every request acts
@@ -79,3 +93,53 @@ async def get_current_user(settings: AppSettings, db: DbSession) -> CurrentUser:
 
 
 AuthUser = Annotated[CurrentUser, Depends(get_current_user)]
+
+
+# ------------------------------------------------------------------------------------------
+# Real authentication by session cookie (P2.4). It is used by /auth/me and /auth/logout now;
+# P2.6 makes it (plus API keys) the identity for every endpoint and removes the dev user above.
+# ------------------------------------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class SessionContext:
+    sid: str
+    user_id: uuid.UUID
+    email: str
+    created_at: datetime
+
+
+def _unavailable() -> ApiError:
+    return ApiError(503, "unavailable", "the service is temporarily unavailable")
+
+
+async def get_session_context(
+    request: Request, db: DbSession, sessions: Sessions, now: Now
+) -> SessionContext:
+    """Who is logged in? Raises 401 (and clears both cookies) for a missing, malformed, expired,
+    revoked or orphaned session, and 503 if Redis or Postgres cannot answer: an outage must not
+    look like "you are logged out"."""
+    sid = request.cookies.get(SESSION_COOKIE)
+    if not sid or not SID_PATTERN.fullmatch(sid):
+        raise ApiError.unauthorized()
+
+    loaded = await sessions.load(sid, now)
+    if sessions.failed(loaded):
+        raise _unavailable()
+    if loaded is None:
+        raise ApiError.unauthorized()
+    session: Session = loaded  # type: ignore[assignment]  # not None, not the failure marker
+
+    try:
+        stmt = select(User.email, User.created_at, User.is_active).where(User.id == session.user_id)
+        row = (await db.execute(stmt)).first()
+    except (SQLAlchemyError, OSError, TimeoutError):
+        raise _unavailable() from None
+    if row is None or not row.is_active:
+        # The account is gone or disabled: the session must not outlive it.
+        await sessions.destroy(sid, session.user_id)
+        raise ApiError.unauthorized()
+    return SessionContext(
+        sid=sid, user_id=session.user_id, email=row.email, created_at=row.created_at
+    )
+
+
+SessionAuth = Annotated[SessionContext, Depends(get_session_context)]
