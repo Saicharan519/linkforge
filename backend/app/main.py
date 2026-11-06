@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from app.api import api_keys, auth, health, links, redirect
 from app.config import Settings, get_settings
 from app.core.errors import install_error_handlers
+from app.core.host_guard import HostGuardMiddleware
 from app.core.passwords import PasswordService
 from app.core.rate_limit import RateLimiter
 from app.core.redis import create_redis
@@ -51,6 +52,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
 
     install_error_handlers(app)
+    # Outermost: the short-link host is restricted before routing or authentication run.
+    app.add_middleware(HostGuardMiddleware, public_host=settings.public_redirect_host)
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(links.router)

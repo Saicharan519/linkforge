@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # forgotten setting must fail closed. Local compose sets it for the UI (:8080) and Vite (:5173).
     allowed_origins: str = ""
 
+    # Hostname of the PUBLIC short-link host (e.g. go.example.com). When a request arrives with
+    # this Host, only GET/HEAD /{code} is served and everything else is 404 (core/host_guard.py).
+    # Empty (local runs) = no guard.
+    public_redirect_host: str = ""
+
     # OpenAPI docs are served at /api/docs only when this is true (dev only).
     enable_docs: bool = False
 
