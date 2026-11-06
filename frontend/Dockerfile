@@ -13,7 +13,10 @@ FROM nginxinc/nginx-unprivileged:1.30-alpine-slim@sha256:5d8bb9437d74a600ec5dbf9
 # just that one package ourselves. Needs root for the moment; USER 101 below drops it again.
 # REMOVE this block when a bumped base digest scans clean on its own (Dependabot, P6).
 USER root
-RUN apk upgrade --no-cache zlib
+# 2026-11-07: the same thing happened again with musl (CVE-2026-107891, HIGH, heap/integer
+# overflow in regcomp, installed 1.2.6-r2, fixed in 1.2.6-r3; musl-utils ships from the same
+# source package). Same remedy, one line longer.
+RUN apk upgrade --no-cache zlib musl musl-utils
 
 # Replace the default server block with ours. Files are root-owned and read-only to uid 101.
 COPY nginx.conf /etc/nginx/conf.d/default.conf
