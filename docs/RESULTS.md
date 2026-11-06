@@ -37,9 +37,9 @@ measured directly.
 
 | Drill | Observed |
 |---|---|
-| Redis pod deleted: redirects keep working, login fails closed, session survives the restart | |
-| Required setting forgotten in git: Argo shows ComparisonError, cluster unchanged,  heals | |
-| Settings-only change rolls the API pods (checksum/config) | |
+| Redis pod deleted: redirects keep working, login fails closed, session survives the restart | Checked once a second from 16:12:08: redirect `302` on all 20 lines; login `503` for the first 6 lines (about 8 s while Redis restarted), then `200`. The cookie from before the restart still returned the user afterwards (the AOF on the volume restored the session). 2026-11-06 |
+| Required setting forgotten in git: Argo shows ComparisonError, cluster unchanged, `git revert` heals | Deleted `ALLOWED_ORIGINS`: app `Sync Unknown / Health Healthy` with the message `config.ALLOWED_ORIGINS is required (e.g. http://app.localtest.me)`; the api, frontend, redis and postgres pods were unchanged (api age 17 m). `git revert` + push gave `Synced / Healthy`. 2026-11-06 |
+| Settings-only change rolls the API pods (checksum/config) | Added `LOG_LEVEL: DEBUG` (no image change): the migrate Job re-ran, then `api-648cfdbb47-*` pods replaced `api-767df76d87-*` one at a time (the new pod was Ready before the old one terminated; old pods ended `Completed`). 2026-11-06 |
 | 130 requests through Traefik to the go host: about 120 x 302 then 429 | |
 | go host answers 404 for /healthz and /api/v1/links; app host unrestricted | |
 

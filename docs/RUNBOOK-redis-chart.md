@@ -95,13 +95,14 @@ A=http://app.localtest.me; O='Origin: http://app.localtest.me'; J='content-type:
 curl -s -X POST $A/api/v1/auth/register -H "$J" -H "$O" -d '{"email":"me@example.com","password":"a long enough password"}'
 curl -s -c /tmp/kind.jar -X POST $A/api/v1/auth/login -H "$J" -H "$O" -d '{"email":"me@example.com","password":"a long enough password"}'
 CSRF=$(awk '$6=="lf_csrf"{print $7}' /tmp/kind.jar)
-curl -s -b /tmp/kind.jar -X POST $A/api/v1/links -H "$J" -H "$O" -H "X-CSRF-Token: $CSRF" -d '{"destination_url":"https://example.com/from-kind"}'
+curl -s -b /tmp/kind.jar -X POST $A/api/v1/links -H "$J" -H "$O" -H "X-CSRF-Token: $CSRF" -d '{"destination_url":"https://example.com/from-kind"}' | tee /tmp/kind-link.json
+CODE=$(python3 -c 'import json;print(json.load(open("/tmp/kind-link.json"))["code"])'); echo; echo "code=$CODE"
 ```
-Expect `201` bodies with an `id`, then a link with a `code`. Use that code (replace `YOURCODE` with
-the real `code` value from the last answer):
+Expect two user bodies (register, login), then a link body with a `code`; the last line prints it.
+The commands below use `$CODE`, so run them in the same terminal (nothing to paste or replace):
 
 ```bash
-curl -si http://go.localtest.me/YOURCODE | head -3
+curl -si http://go.localtest.me/$CODE | head -3
 ```
 Expect `HTTP/1.1 302 Found`.
 
@@ -118,7 +119,7 @@ curl). The first two are exactly what the old chart could not do.
 The **rate limit**, seen through Traefik (one proxy, so the real client address is used):
 
 ```bash
-for i in $(seq 1 130); do curl -s -o /dev/null -w '%{http_code}\n' http://go.localtest.me/YOURCODE; done | sort | uniq -c
+for i in $(seq 1 130); do curl -s -o /dev/null -w '%{http_code}\n' http://go.localtest.me/$CODE; done | sort | uniq -c
 ```
 Expect about `120 302` then `10 429`. (Wait a minute before repeating; the window is one minute.)
 
@@ -131,7 +132,7 @@ kubectl -n linkforge delete pod redis-0
 ```
 In another terminal, while it restarts (about 10 s):
 ```bash
-for i in $(seq 1 20); do curl -s -o /dev/null -w '%{http_code} ' http://go.localtest.me/YOURCODE; sleep 1; done; echo
+for i in $(seq 1 20); do curl -s -o /dev/null -w '%{http_code} ' http://go.localtest.me/$CODE; sleep 1; done; echo
 curl -s -o /dev/null -w 'login while Redis is down: %{http_code}\n' -X POST http://app.localtest.me/api/v1/auth/login -H 'content-type: application/json' -H 'Origin: http://app.localtest.me' -d '{"email":"me@example.com","password":"a long enough password"}'
 ```
 Expect `302` every time (redirects fail open) and `503` for the login (fail closed). After Redis is
