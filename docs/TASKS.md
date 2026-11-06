@@ -69,6 +69,7 @@ DevOps pointer: §2, §3, §7, §8, §9.
 - ☑ P2.7 (D62) API keys (create/list/revoke, `X-API-Key`), per-user create limiter. *Test:* revoked → 401; plaintext never re-readable; limit shared across sessions + keys.
 - ☑ P2.8 (D63; HEAD-never-counts is pinned now, fully testable once P3.1 adds the click XADD) Host guard middleware (`PUBLIC_REDIRECT_HOST`). *Test:* on that host only `GET`/`HEAD /{code}` works. Also: explicit `HEAD /{code}` route that never enqueues a click (D12); create limiter fails closed (D13).
 Done when: all the tests above pass against real Postgres+Redis.
+Chart follow-up for P3 (D71, docs/RUNBOOK-p3-chart.md): worker Deployment, IP_HASH_SECRET and metrics ports in `linkforge-gitops`; written and rendered offline, NOT yet deployed by the human.
 Chart follow-up (D64, docs/RUNBOOK-redis-chart.md): Redis StatefulSet + P2 settings in the linkforge-gitops repo; written and rendered offline, NOT yet deployed by the human.
 Prompt:
 > P2 only. Plan P2.1–P2.8 following ARCHITECTURE §2.1, §2.4, §5, §6. List the exact tests for each fail-open/fail-closed case. Wait for approval.

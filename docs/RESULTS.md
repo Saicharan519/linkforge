@@ -43,6 +43,17 @@ measured directly.
 | 130 requests through Traefik to the go host: about 120 x 302 then 429 | |
 | go host answers 404 for /healthz and /api/v1/links; app host unrestricted | |
 
+## P3 on kind (click worker chart follow-up, docs/RUNBOOK-p3-chart.md)
+
+| Drill | Observed |
+|---|---|
+| Rollout order: secret key, chart (worker off), application, worker on; old pods serving throughout | |
+| Analytics after clicks with different browsers (bot stored but not counted, referrer host only) | |
+| Worker switched off the GitOps way: lag grows on the API metrics port, drains when switched on | |
+| A malformed message ends in clicks:dead and click_events_processed_total{status=dead} +1 | |
+| Redis pod deleted: the worker stays Running and storing resumes | |
+| /metrics is not reachable through any Ingress host | |
+
 ## Resource use on kind (validates ARCHITECTURE §9.3 estimates)
 
 Paste `kubectl top pods -n linkforge` and `kubectl top nodes` here, idle and (later) under load:
