@@ -33,6 +33,9 @@ from tests.integration.conftest import BACKEND_DIR
 from tests.integration.factories import make_link, make_user
 
 T0 = datetime(2026, 11, 6, 12, 0, 0, tzinfo=UTC)
+# A real browser string: with the real classifier an EMPTY user agent counts as a bot, so tests
+# that expect clicks to be counted must send a believable one.
+HUMAN_UA = "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0"
 
 
 def settings_with(**overrides: object) -> Settings:
@@ -68,7 +71,7 @@ def fields(
     *,
     event_id: uuid.UUID | None = None,
     ts: datetime | str = T0,
-    ua: str = "",
+    ua: str = HUMAN_UA,
     referrer: str = "",
 ) -> dict[str, str]:
     link_id = link.id if isinstance(link, Link) else link
@@ -514,14 +517,24 @@ async def test_the_worker_process_stores_a_queued_click(
         stderr=asyncio.subprocess.STDOUT,
     )
     try:
-        await add(raw, link, ua="curl/8")
+        await add(raw, link)  # a person
+        await add(raw, link, ua="curl/8.5.0")  # a script: stored, never counted
         deadline = asyncio.get_event_loop().time() + 20
         stored = 0
-        while asyncio.get_event_loop().time() < deadline and stored == 0:
+        while asyncio.get_event_loop().time() < deadline and stored < 2:
             await asyncio.sleep(0.3)
             stored = len(await events(db))
-        assert stored == 1, "the worker process did not store the click in time"
-        assert await stats(db) == {(link.id, T0.date()): 1}
+        assert stored == 2, "the worker process did not store the clicks in time"
+        assert await stats(db) == {(link.id, T0.date()): 1}  # only the person
+        by_agent = {e.user_agent: e for e in await events(db)}
+        assert by_agent["curl/8.5.0"].is_bot is True
+        human = by_agent[HUMAN_UA]
+        assert (human.is_bot, human.device_type, human.browser, human.os) == (
+            False,
+            "desktop",
+            "Firefox",
+            "Linux",
+        )
         assert (await raw.xpending(STREAM, GROUP))["pending"] == 0
         assert proc.returncode is None  # still running
     finally:
