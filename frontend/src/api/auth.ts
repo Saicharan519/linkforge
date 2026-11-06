@@ -17,4 +17,7 @@ export const login = (body: Credentials) =>
 export const register = (body: Credentials) =>
   api<User>("/auth/register", { method: "POST", body, redirectOn401: false });
 
+export const changePassword = (body: { old_password: string; new_password: string }) =>
+  api<void>("/auth/change-password", { method: "POST", body });
+
 export const logout = () => api<void>("/auth/logout", { method: "POST" });

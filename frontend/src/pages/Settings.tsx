@@ -1,5 +1,17 @@
-import { PageStub } from "@/components/layout/PageStub";
+import { ApiKeysSection } from "@/components/settings/ApiKeysSection";
+import { ChangePasswordForm } from "@/components/settings/ChangePasswordForm";
+import { useSession } from "@/hooks/useSession";
 
 export default function Settings() {
-  return <PageStub title="Settings" task="P4.5" />;
+  const session = useSession();
+  return (
+    <div className="space-y-10">
+      <div>
+        <h1 className="text-3xl font-extrabold tracking-tight">Settings</h1>
+        {session.data && <p className="mt-1 text-muted-foreground">Signed in as {session.data.email}</p>}
+      </div>
+      <ApiKeysSection />
+      <ChangePasswordForm />
+    </div>
+  );
 }

@@ -12,16 +12,21 @@ export function DialogContent({
   description,
   children,
   className,
+  dismissible = true,
 }: {
   title: string;
   description: string;
   children: React.ReactNode;
   className?: string;
+  /** false = a stray click outside or Escape does not close it (use for one-time information). */
+  dismissible?: boolean;
 }) {
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/50" />
       <DialogPrimitive.Content
+        onInteractOutside={dismissible ? undefined : (e) => e.preventDefault()}
+        onEscapeKeyDown={dismissible ? undefined : (e) => e.preventDefault()}
         className={cn(
           "plate fixed top-1/2 left-1/2 z-50 max-h-[90vh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto p-6",
           className,
