@@ -24,9 +24,9 @@ describe("protected routes", () => {
 
   it("shows the screen and the user's email when signed in", async () => {
     server.use(http.get(`${API}/auth/me`, () => HttpResponse.json(USER)));
-    renderApp("/app/links");
+    renderApp("/app/settings");
 
-    expect(await screen.findByRole("heading", { name: "Links" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getAllByText(USER.email).length).toBeGreaterThan(0);
     expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
   });
