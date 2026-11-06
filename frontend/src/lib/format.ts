@@ -23,3 +23,6 @@ export function localInputToIso(value: string): string | null {
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
+
+/** "2026-03-14" -> "03-14". String slicing on purpose: a day label is a calendar date, never a Date. */
+export const shortDay = (day: string) => day.slice(5);

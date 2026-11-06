@@ -25,6 +25,22 @@ afterEach(() => {
 
 afterAll(() => server.close());
 
+// jsdom does no layout, so Recharts' ResponsiveContainer would measure 0x0 and draw nothing.
+// This stand-in reports a fixed size, which lets tests see the real bars.
+class FixedSizeResizeObserver {
+  constructor(private callback: ResizeObserverCallback) {}
+  observe(target: Element) {
+    const rect = { width: 600, height: 240, top: 0, left: 0, bottom: 240, right: 600, x: 0, y: 0, toJSON() {} };
+    this.callback(
+      [{ target, contentRect: rect, borderBoxSize: [], contentBoxSize: [], devicePixelContentBoxSize: [] }],
+      this as unknown as ResizeObserver,
+    );
+  }
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver = FixedSizeResizeObserver as unknown as typeof ResizeObserver;
+
 // jsdom has no matchMedia; the theme code asks the operating-system preference through it.
 if (!window.matchMedia) {
   window.matchMedia = (query: string) =>
