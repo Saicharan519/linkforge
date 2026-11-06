@@ -87,6 +87,43 @@ jobs:
       - name: Tests (real Postgres and Redis)
         run: pytest -q
 
+  # The web app. Same four gates as `npm run lint && npm run typecheck && npm test && npm run
+  # build` locally (frontend/CLAUDE.md). The tests need no services: the network is faked at the
+  # fetch boundary (MSW), nothing else is. `npm ci` installs exactly what package-lock.json says
+  # and fails if package.json and the lock file disagree.
+  frontend:
+    name: frontend (eslint + tsc + vitest + build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies (exactly the lock file)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
   # Builds both images WITHOUT pushing and applies the Trivy gate, so a broken Dockerfile or a
   # vulnerable base image fails the pull request, not the deploy. Skipped when this workflow is
   # called from build-push.yml (event_name is then the caller's "push"): that workflow builds,
