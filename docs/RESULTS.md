@@ -47,12 +47,12 @@ measured directly.
 
 | Drill | Observed |
 |---|---|
-| Rollout order: secret key, chart (worker off), application, worker on; old pods serving throughout | |
-| Analytics after clicks with different browsers (bot stored but not counted, referrer host only) | |
-| Worker switched off the GitOps way: lag grows on the API metrics port, drains when switched on | |
-| A malformed message ends in clicks:dead and click_events_processed_total{status=dead} +1 | |
-| Redis pod deleted: the worker stays Running and storing resumes | |
-| /metrics is not reachable through any Ingress host | |
+| Rollout order: secret key, chart (worker off), application, worker on; old pods serving throughout | NOT followed (the application was pushed before the chart), which exposed two real problems. (1) The new image's migrate hook failed with `ip_hash_secret Field required`: Alembic loads the app Settings and my chart had not given the migration Job the secret (fixed in 8a379c2, D71). The old API pods (P2 image) kept serving the whole time (`maxUnavailable: 0`), the new API never rolled. (2) After the fix was pushed the migrate pods kept failing because Argo retries a running sync against the commit it started with (op revision 91adc3e, desired 8a379c2); `kubectl -n argocd patch app linkforge --type merge -p '{"operation":null}'` started a fresh sync: migrate `Completed`, api and frontend rolled to `sha-b5da595`, app `Synced / Healthy`. Worker then enabled with a one-line commit. 2026-11-06 |
+| Analytics after clicks with different browsers (bot stored but not counted, referrer host only) | 3 desktop Chrome clicks with a `Referer` carrying `?token=SECRET`, plus one `curl/8.5.0`: analytics `total 3`, referrers `news.example.com` (host only), devices desktop 3, browsers Chrome 3; worker `click_events_processed_total{status="ok"} 4` (3 people + 1 stored bot). 2026-11-06 |
+| Worker switched off the GitOps way: lag grows on the API metrics port, drains when switched on | Worker off (`worker.enabled: false` in git) and 10 browser clicks: API port showed `click_stream_lag 10.0`, `pending 0.0`, `length 14.0`, analytics still `total 3`. Switched on again: 25 s later the gauge still read 10 (the worker pod was still starting behind the re-run migration hook); about a minute later `lag 0.0`, `pending 0.0`, `length 15.0` (14 + the malformed message of the next drill); Postgres: 13 human rows + 1 bot row, daily counter 13: nothing lost, nothing counted twice. 2026-11-06 |
+| A malformed message ends in clicks:dead and click_events_processed_total{status=dead} +1 | `XADD clicks * event_id not-a-uuid link_id nope`: within 3 s `clicks:dead` held one entry with the original fields, `original_id`, `error malformed: KeyError: 'ts'` and `failed_at` 2026-11-06T19:03:43Z. 2026-11-06 |
+| Redis pod deleted: the worker stays Running and storing resumes | `redis-0` back `1/1` in 3 s; `worker-...` stayed `1/1 Running` with 0 restarts throughout. 2026-11-06 |
+| /metrics is not reachable through any Ingress host | `go.localtest.me/metrics` 404 (host guard), `app.localtest.me/api/metrics` 404 (the API has no such route), `app.localtest.me/metrics` the placeholder HTML page (the frontend, not Prometheus text). The metrics are only on the pod ports 9101/9100 via port-forward. 2026-11-06 |
 
 ## Resource use on kind (validates ARCHITECTURE §9.3 estimates)
 
@@ -74,3 +74,20 @@ linkforge-control-plane   410m         3%       2484Mi          31%
 ```
 
 Under load: not yet measured (P8 / k6).
+
+With the P3 stack on kind (API x2, frontend, Postgres, worker; 2026-11-06, idle):
+
+```
+$ kubectl top pods -n linkforge
+NAME                        CPU(cores)   MEMORY(bytes)
+api-8c97c5548-btm7x         4m           69Mi
+api-8c97c5548-jfcf6         6m           67Mi
+frontend-74bf984895-qhqsl   1m           11Mi
+postgres-0                  35m          30Mi
+worker-7c8c8f4d97-2n7sb     3m           62Mi
+(redis-0 had just been restarted and had no sample yet)
+
+$ kubectl top nodes
+linkforge-control-plane   597m   4%   2403Mi   30%
+```
+
