@@ -14,7 +14,7 @@ async def test_app_boots(client: AsyncClient) -> None:
 async def test_readyz_ok_with_postgres(client: AsyncClient) -> None:
     resp = await client.get("/readyz")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok", "postgres": "ok"}
+    assert resp.json() == {"status": "ok", "postgres": "ok", "redis": "ok"}
 
 
 async def test_readyz_fails_when_db_unreachable() -> None:
@@ -26,7 +26,7 @@ async def test_readyz_fails_when_db_unreachable() -> None:
         # ...but readiness reports 503 instead of crashing or hanging.
         resp = await client.get("/readyz")
     assert resp.status_code == 503
-    assert resp.json() == {"status": "unavailable", "postgres": "down"}
+    assert resp.json() == {"status": "unavailable", "postgres": "down", "redis": "ok"}
 
 
 async def test_docs_disabled_by_default() -> None:

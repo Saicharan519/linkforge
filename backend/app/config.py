@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     db_pool_size: int = 3
     db_max_overflow: int = 2
 
+    # Redis (ARCHITECTURE §2.1, §9.1). The default is a convenience for local runs only; it is not
+    # a secret and a wrong value is survivable by design: every Redis call has a fallback (D56).
+    redis_url: str = "redis://localhost:6379/0"
+    # Per-operation socket timeout and connect timeout. Short on purpose: a slow Redis must cost
+    # the redirect path at most ~100 ms per call, never a hung request.
+    redis_socket_timeout_ms: int = 100
+    redis_connect_timeout_ms: int = 200
+
     # OpenAPI docs are served at /api/docs only when this is true (dev only).
     enable_docs: bool = False
 

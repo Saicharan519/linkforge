@@ -60,7 +60,7 @@ Prompt:
 DevOps pointer: §2, §3, §7, §8, §9.
 
 ## P2 — Redis cache, rate limits, auth sessions, API keys
-- ☐ P2.1 Redis client with timeouts (100/200 ms) + `redis_errors_total`. *Test:* unreachable Redis → helper returns fallback, no exception.
+- ☑ P2.1 Redis client with timeouts (100/200 ms) + `redis_errors_total`. *Test:* unreachable Redis → helper returns fallback, no exception. (Also: hung Redis, deadline, `/readyz` redis field, D56.)
 - ☐ P2.2 Redirect cache-aside + negative cache + DEL invalidation + TTL rule (ARCH §2.1). *Test:* hit/miss/negative; edit→redirect immediate; stale-race entry expires within TTL; Redis down → still 302.
 - ☐ P2.3 Lua rate limiter, env-driven limits, `client_ip` with trusted-proxy rule. *Test:* limit hit → 429; Redis down → redirect allowed (open), login denied (closed); spoofed XFF ignored.
 - ☐ P2.4 Register/login/logout/me, argon2 (semaphore), Redis sessions, rotation, cookie flags, malformed-session handling. *Test:* ARCH §2.4 cases.

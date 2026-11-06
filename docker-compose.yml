@@ -13,6 +13,8 @@ x-backend: &backend
     # Inside the compose network the database is reached by its SERVICE NAME ("postgres"), not
     # localhost: Compose gives every service a DNS name on a private network.
     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-linkforge}:${POSTGRES_PASSWORD:-linkforge_dev}@postgres:5432/${POSTGRES_DB:-linkforge}
+    # Same idea as the database: the Redis SERVICE NAME, reachable on the compose network.
+    REDIS_URL: redis://redis:6379/0
     ENV: dev
     SHORT_URL_BASE: http://localhost:8000
 
@@ -39,6 +41,10 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      # Started so the local stack is complete, but NOT required to be healthy: the API must keep
+      # working with Redis down (ARCHITECTURE §2.1), so this only orders the start-up.
+      redis:
+        condition: service_started
     restart: unless-stopped
 
   # Placeholder static page (P1S.2); becomes the real SPA in P4/P5.

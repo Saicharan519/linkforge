@@ -16,6 +16,7 @@ from typing import Any
 
 import asyncpg
 import pytest
+import redis.asyncio as aioredis
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.engine import make_url
@@ -26,7 +27,7 @@ from app.config import Settings
 from app.db import create_engine, create_sessionmaker
 from app.main import create_app
 from app.models import User
-from tests.conftest import TEST_DATABASE_URL
+from tests.conftest import TEST_DATABASE_URL, TEST_REDIS_URL
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -94,6 +95,17 @@ async def clean_tables(migrated_database: None) -> None:
         await conn.execute(f"TRUNCATE {ALL_TABLES} RESTART IDENTITY CASCADE")
     finally:
         await conn.close()
+
+
+@pytest.fixture(autouse=True)
+async def clean_redis() -> None:
+    """Empty the test Redis database before each test (needs `docker compose up -d redis`)."""
+    assert TEST_REDIS_URL.rstrip("/").endswith("/15"), "refusing to flush a non-test Redis db"
+    r = aioredis.from_url(TEST_REDIS_URL)
+    try:
+        await r.flushdb()
+    finally:
+        await r.aclose()
 
 
 @asynccontextmanager

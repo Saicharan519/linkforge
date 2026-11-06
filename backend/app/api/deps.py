@@ -12,12 +12,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.core.errors import ApiError
+from app.core.redis import SafeRedis
 from app.db import get_db
 from app.models import User
 
 
 def get_app_settings(request: Request) -> Settings:
     return request.app.state.settings
+
+
+def get_redis(request: Request) -> SafeRedis:
+    return request.app.state.redis
 
 
 def get_now() -> datetime:
@@ -34,6 +39,7 @@ class CurrentUser:
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 AppSettings = Annotated[Settings, Depends(get_app_settings)]
 Now = Annotated[datetime, Depends(get_now)]
+RedisClient = Annotated[SafeRedis, Depends(get_redis)]
 
 # ------------------------------------------------------------------------------------------
 # TEMPORARY (decision D37): there is no authentication yet (P2). Until then every request acts
