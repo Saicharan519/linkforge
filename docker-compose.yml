@@ -45,6 +45,8 @@ services:
     ports:
       # 127.0.0.1 only: reachable from this machine, not from your network.
       - "127.0.0.1:8000:8000"
+      # Prometheus metrics: their own port, local machine only (never an Ingress or public host).
+      - "127.0.0.1:9101:9101"
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,6 +63,9 @@ services:
   worker:
     <<: *backend
     command: ["python", "-m", "app.worker"]
+    ports:
+      # the worker's metrics (ARCHITECTURE section 1.2), local machine only
+      - "127.0.0.1:9100:9100"
     depends_on:
       postgres:
         condition: service_healthy

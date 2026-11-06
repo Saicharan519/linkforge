@@ -1,6 +1,7 @@
 """Application factory. `uvicorn app.main:app` serves the module-level `app`."""
 
-import logging
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -10,10 +11,14 @@ from app.api import analytics, api_keys, auth, health, links, redirect
 from app.config import Settings, get_settings
 from app.core.errors import install_error_handlers
 from app.core.host_guard import HostGuardMiddleware
+from app.core.logging import configure_logging
+from app.core.metrics_server import start_metrics_server
+from app.core.observability import RequestMiddleware
 from app.core.passwords import PasswordService
 from app.core.rate_limit import RateLimiter
 from app.core.redis import create_redis
 from app.core.sessions import SessionStore
+from app.core.stream_metrics import run_gauge_refresher
 from app.db import create_engine, create_sessionmaker
 
 
@@ -29,16 +34,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.limiter = RateLimiter(app.state.redis)
     app.state.sessions = SessionStore(app.state.redis, app.state.settings.session_ttl_seconds)
     app.state.passwords = PasswordService()  # argon2, at most 2 hashes at once (D10)
+    # Metrics: their own port (never the public one) and the click-stream gauges.
+    metrics = start_metrics_server(app.state.settings.metrics_port)
+    app.state.metrics_port = metrics.port if metrics else None
+    refresher = None
+    if metrics:
+        refresher = asyncio.create_task(
+            run_gauge_refresher(app.state.redis, app.state.settings.metrics_refresh_seconds)
+        )
     try:
         yield
     finally:
+        if refresher:
+            refresher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await refresher
+        if metrics:
+            metrics.stop()
         await app.state.redis.aclose()
         await engine.dispose()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    logging.basicConfig(level=settings.log_level)
+    configure_logging(settings.log_level)  # JSON lines on stdout
 
     app = FastAPI(
         title="LinkForge API",
@@ -54,6 +73,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_error_handlers(app)
     # Outermost: the short-link host is restricted before routing or authentication run.
     app.add_middleware(HostGuardMiddleware, public_host=settings.public_redirect_host)
+    # Added last = OUTERMOST: request id, metrics and the access log see every request, including
+    # the ones the host guard answers.
+    app.add_middleware(RequestMiddleware)
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(links.router)

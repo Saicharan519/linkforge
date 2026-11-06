@@ -4,7 +4,7 @@ They live in one module so a name is defined exactly once. The /metrics endpoint
 internal port arrives with P3; until then the counters are recorded but not yet scraped.
 """
 
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Gauge, Histogram
 
 # `op` is always a fixed literal from the code (ratelimit, cache_get, neg_get, cache_set, neg_set,
 # cache_del, enqueue, readyz, ...), never user input, so the label set stays small.
@@ -46,4 +46,28 @@ CLICKS_PROCESSED = Counter(
 CLICK_BATCH_SECONDS = Histogram(
     "click_worker_batch_seconds",
     "Seconds the worker spent on one batch (database work and acknowledgement)",
+)
+
+# --- HTTP (ARCHITECTURE §7) -------------------------------------------------------------------
+# `route` is the route TEMPLATE ("/{code}", "/api/v1/links/{id}"), never the raw path, so the number
+# of time series stays small no matter how many links or junk URLs exist.
+HTTP_REQUESTS = Counter(
+    "http_requests_total",
+    "HTTP requests by method, route template and status",
+    ["method", "route", "status"],
+)
+HTTP_DURATION = Histogram(
+    "http_request_duration_seconds",
+    "Server-side request duration up to the last response byte",
+    ["method", "route", "status"],
+    buckets=[0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
+)
+
+# --- the click stream (refreshed by core/stream_metrics.py) -----------------------------------
+CLICK_STREAM_LENGTH = Gauge("click_stream_length", "Entries in the click stream (XLEN)")
+CLICK_STREAM_LAG = Gauge(
+    "click_stream_lag", "Click events no worker has received yet (XLEN when Redis cannot tell)"
+)
+CLICK_STREAM_PENDING = Gauge(
+    "click_stream_pending", "Click events delivered to a worker but not yet acknowledged"
 )

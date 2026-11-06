@@ -70,4 +70,7 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
 # --no-proxy-headers: uvicorn would otherwise rewrite the client address from X-Forwarded-For for
 # peers in its allow-list (default 127.0.0.1). The ONLY code allowed to interpret that header is
 # app/core/client_ip.py (TRUSTED_PROXY_COUNT rule, ARCHITECTURE §6.3); no second, hidden rule.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]
+#
+# --no-access-log: uvicorn's access log prints the CLIENT ADDRESS of every request, which must
+# never be logged. The app writes its own JSON access log without it (core/observability.py).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers", "--no-access-log"]

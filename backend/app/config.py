@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     max_deliveries: int = 5
     click_dead_maxlen: int = 10000  # approximate cap of clicks:dead (a memory guard)
 
+    # Prometheus metrics live on their OWN port, never on the public one (ARCHITECTURE §1.2).
+    # 0 = pick a free port (tests), negative = no metrics server.
+    metrics_port: int = 9101
+    worker_metrics_port: int = 9100
+    # How often the click-stream gauges (lag, pending, length) are refreshed from Redis.
+    metrics_refresh_seconds: float = 5
+
     # OpenAPI docs are served at /api/docs only when this is true (dev only).
     enable_docs: bool = False
 
