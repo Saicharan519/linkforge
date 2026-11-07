@@ -112,6 +112,24 @@ async def pending_ids(raw: aioredis.Redis) -> list[str]:
     return [p["message_id"] for p in await raw.xpending_range(STREAM, GROUP, "-", "+", 1000)]
 
 
+async def wait_idle(raw: aioredis.Redis, min_idle_ms: int = 60) -> None:
+    """Wait until every pending message has been idle for `min_idle_ms` (Redis's own idle clock).
+
+    The tests use worker_claim_idle_ms=50. A fixed `asyncio.sleep(0.1)` assumed that 0.1 s of
+    wall-clock time is always more than 50 ms of idle time; this asks Redis instead, so a slow
+    machine cannot make a reclaim() find nothing to take over (it failed once in a full-suite
+    run and was not reproducible in 36 reruns, so the cause is a best guess).
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5
+    while True:
+        rows = await raw.xpending_range(STREAM, GROUP, "-", "+", 1000)
+        if all(r["time_since_delivered"] >= min_idle_ms for r in rows):
+            return
+        assert loop.time() < deadline, f"pending entries never became idle: {rows}"
+        await asyncio.sleep(0.02)
+
+
 # --- a crash between the commit and the acknowledgement (the REQUIRED test) -------------------
 
 
@@ -136,8 +154,10 @@ async def test_commit_then_crash_before_xack_is_redelivered_without_double_count
     assert await stats(db) == {(link.id, T0.date()): 2}
 
     duplicates = processed("duplicate")
-    await asyncio.sleep(0.1)  # let them become idle
-    assert await pod_b.reclaim() == 2  # pod-b takes them over and processes them again
+    await wait_idle(raw)  # let them become idle (Redis's clock, not ours)
+    pending_before = await raw.xpending_range(STREAM, GROUP, "-", "+", 10)
+    claimed = await pod_b.reclaim()  # pod-b takes them over and processes them again
+    assert claimed == 2, f"reclaim claimed {claimed}; pending before it: {pending_before}"
 
     assert await pending_ids(raw) == []  # now acknowledged
     assert len(await events(db)) == 2  # still exactly two rows
@@ -198,12 +218,12 @@ async def test_a_poison_message_is_dead_lettered_after_max_deliveries(
     await consumer.run_once()  # delivery 1: the good one is stored, the poison one fails
     dead_before = processed("dead")
 
-    await asyncio.sleep(0.1)
+    await wait_idle(raw)
     await consumer.reclaim()  # delivery 2: fails again, still pending
     assert await pending_ids(raw) == [poison_id]
     assert await raw.xlen(DEAD_STREAM) == 0
 
-    await asyncio.sleep(0.1)
+    await wait_idle(raw)
     await consumer.reclaim()  # delivery 3 = MAX_DELIVERIES: given up
     assert await pending_ids(raw) == []  # acknowledged, because the dead-letter write succeeded
     ((_, record),) = await raw.xrange(DEAD_STREAM)
@@ -226,13 +246,13 @@ async def test_the_dead_letter_is_acknowledged_only_after_its_write_succeeded(
     await consumer.run_once()
 
     await raw.set(DEAD_STREAM, "I am a string, not a stream")  # XADD to it now really fails
-    await asyncio.sleep(0.1)
+    await wait_idle(raw)
     await consumer.reclaim()
     assert await pending_ids(raw) == [poison_id]  # NOT acknowledged: nothing may be lost silently
     assert await raw.get(DEAD_STREAM) == "I am a string, not a stream"
 
     await raw.delete(DEAD_STREAM)  # the problem is fixed
-    await asyncio.sleep(0.1)
+    await wait_idle(raw)
     await consumer.reclaim()
     assert await pending_ids(raw) == []
     assert [r["original_id"] for _, r in await raw.xrange(DEAD_STREAM)] == [poison_id]

@@ -1,5 +1,6 @@
 """Async database engine and session factory (SQLAlchemy 2.0 + asyncpg)."""
 
+import logging
 from collections.abc import AsyncIterator
 
 from fastapi import Request
@@ -11,6 +12,8 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.config import Settings
+
+logger = logging.getLogger(__name__)
 
 # Decision D39: a code constant, not an env var. A dead database must fail fast (readiness, 503s)
 # instead of hanging a request for the OS default TCP timeout.
@@ -38,6 +41,26 @@ def create_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]
 
 
 async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
-    """FastAPI dependency: one session per request, always closed."""
-    async with request.app.state.sessionmaker() as session:
+    """FastAPI dependency: one session per request, always closed.
+
+    Closing a session rolls back, and a rollback needs a live connection. If Postgres goes away
+    while the request is finishing (a restart, a failover), that rollback raises, and an error
+    raised while a dependency is torn down REPLACES the response: the client got a 500 even though
+    the handler had already produced an answer (found in P8b with `kubectl delete pod postgres-0
+    --grace-period=0`). The answer is already decided by then, so a failed close is logged and the
+    dead connection is discarded instead.
+    """
+    session = request.app.state.sessionmaker()
+    try:
         yield session
+    finally:
+        try:
+            await session.close()
+        except Exception as exc:  # noqa: BLE001  (any driver error: the connection is gone either way)
+            logger.warning(
+                "db session close failed (%s); discarding the connection", type(exc).__name__
+            )
+            try:
+                await session.invalidate()
+            except Exception:  # noqa: BLE001  (already broken: nothing more to do)
+                logger.debug("db session invalidate failed too", exc_info=True)
