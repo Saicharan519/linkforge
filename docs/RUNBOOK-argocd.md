@@ -202,3 +202,24 @@ was needed to fix it.**
 4. In proof 3, why did the site stay up, and why was `git revert` enough to fix it?
 5. What is the risk of running `kubectl edit` on a managed app?
 6. Where did the image tag in your cluster come from, step by step, starting from your `git push`?
+
+## Recovery: a failed migration left the sync stuck (learned in the P7D drill, 2026-11-07)
+
+Symptom: after a bad commit the Application shows `OutOfSync`/`Synced` with operation `Running` and the
+message `waiting for completion of hook batch/Job/migrate`; a `migrate` Job exists with `Error` pods. The old
+pods keep serving (that is the design). Reverting the commit alone does NOT fix it, because a running sync
+stays pinned to the commit it started with. In order:
+
+1. Revert the bad commit and push (`git revert --no-edit <sha> && git push`).
+2. Cancel the operation: `kubectl -n argocd patch app linkforge --type merge -p '{"operation":null}'`
+   (answers "no change" if nothing is queued; harmless).
+3. If the leftover Job will not go away (`kubectl -n linkforge delete job migrate` says "deleted" but the Job
+   stays): Argo puts the finalizer `argocd.argoproj.io/hook-finalizer` on hook Jobs and its own stuck sync is
+   waiting for that very Job. Remove it from THAT Job only:
+   `kubectl -n linkforge patch job migrate --type merge -p '{"metadata":{"finalizers":null}}'`.
+4. If `kubectl -n argocd get app linkforge -o jsonpath='{.status.operationState.phase}'` still says `Running`
+   for a Job that no longer exists, clear the stale record:
+   `kubectl -n argocd patch app linkforge --type json -p '[{"op":"remove","path":"/status/operationState"}]'`
+   and hard-refresh (`kubectl -n argocd annotate app linkforge argocd.argoproj.io/refresh=hard --overwrite`).
+
+Check: all Applications `Synced`/`Healthy`, pods unchanged, the next sync creates a fresh `migrate` Job.

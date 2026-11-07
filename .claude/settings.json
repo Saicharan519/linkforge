@@ -32,7 +32,9 @@
       "Read(./**/terraform.tfvars)",
       "Read(~/.aws/**)",
       "Read(**/.aws/**)",
-      "Read(~/.ssh/**)"
+      "Read(~/.ssh/**)",
+      "Read(~/.sealed-secrets-backup/**)",
+      "Read(**/.sealed-secrets-backup/**)"
     ]
   }
 }
