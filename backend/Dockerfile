@@ -69,6 +69,11 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini .
 
+# The CA bundle for TLS to Amazon RDS (decision D85; provenance and update steps in certs/README.md). Public
+# certificates only. Root-owned and read-only; the app uses it only when DATABASE_SSL_MODE is verify-ca or
+# verify-full and DATABASE_SSL_CA_FILE points here (EKS values), so kind and compose are unaffected.
+COPY certs/rds-global-bundle.pem /etc/ssl/rds/global-bundle.pem
+
 USER 10001:10001
 
 EXPOSE 8000
