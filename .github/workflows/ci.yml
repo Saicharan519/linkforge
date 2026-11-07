@@ -31,7 +31,7 @@ jobs:
     # Real Postgres and Redis next to the job, exactly like local docker compose. No mocks.
     services:
       postgres:
-        image: postgres:16.4
+        image: postgres:16.15
         env:
           POSTGRES_USER: linkforge
           # Throwaway value: this database exists only for the duration of this job.

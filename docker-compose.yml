@@ -103,7 +103,7 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:16.4
+    image: postgres:16.15
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-linkforge}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-linkforge_dev}
