@@ -118,7 +118,7 @@ Semantics: at-least-once delivery, idempotent processing via `event_id` unique c
 
 ### 2.3.1 Stream durability — what we do and don't guarantee
 - `clicks` is capped with `XADD ... MAXLEN ~ CLICK_STREAM_MAXLEN` (default 100000, ≈ tens of MB) purely as a **memory guard**. Trimming ignores consumer-group state: if the worker is down long enough for the backlog to exceed the cap, the OLDEST entries (possibly still pending) are lost. This is a **bounded-loss design choice**, not a bug.
-- Defences: alert on `click_stream_lag` (> 5000 for 5 min) and `click_stream_length` (> 80000) long before the cap; runbook = restart the worker first. Dropped/trimmed events are visible as the gap between `click_events_enqueued_total` and `click_events_processed_total`.
+- Defences: alert on `click_stream_lag` (> 5000 for 5 min) and on the backlog `lag + pending` (> 80000) long before the cap (the stream length itself sits at the cap in a healthy system, D82); runbook = restart the worker first. Dropped/trimmed events are visible as the gap between `click_events_enqueued_total` and `click_events_processed_total`.
 - `appendfsync everysec`: a Redis crash can lose ≈ the last 1 second of writes. We state "at-least-once from the app's view, best-effort across a Redis crash", never "zero loss".
 - Product statement (PRD F4): click counts are a **lower bound** during Redis outages.
 
@@ -246,7 +246,7 @@ Database connections to RDS use TLS **with certificate verification** (`verify-f
 | Benchmark target (SLO-ish) | warm-cache redirect p95, server-side | **< 50 ms** (report the actual number) |
 | Alert threshold | same SLI, 5 min | p95 **> 250 ms** (5× worse than target = something is broken) |
 | k6 client-side threshold | includes network from where k6 runs | p95 < 250 ms from inside the cluster; laptop numbers include your internet and must be labelled as such |
-Other alerts: 5xx ratio > 2% for 5 min **and** request rate > 0.1/s; `click_stream_lag` > 5000 for 5 min; `click_stream_pending` > 500 for 10 min; `click_stream_length` > 80000; `click_events_dropped_total` rate > 0 for 5 min; Redis memory > 80%; crash-looping pods; API target down.
+Other alerts: 5xx ratio > 2% for 5 min **and** request rate > 0.1/s; `click_stream_lag` > 5000 for 5 min; `click_stream_pending` > 500 for 10 min; click backlog (`click_stream_lag` + `click_stream_pending`) > 80000 (NOT `click_stream_length`: it never shrinks because acked entries are not deleted, D82); `click_events_dropped_total` rate > 0 for 5 min; Redis memory > 80%; crash-looping pods; API target down.
 
 ## 8. Failure behaviour (demo this; say it in interviews)
 | What dies | Redirects | Logins/API | Analytics |
