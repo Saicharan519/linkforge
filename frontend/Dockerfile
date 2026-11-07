@@ -25,7 +25,7 @@ RUN npm run build
 # ---- Stage 2: runtime ------------------------------------------------------------------------
 # nginx-unprivileged: the official nginx image variant that runs as uid 101 and listens on 8080
 # (ports below 1024 need root). Pinned by tag AND digest, same reasoning as the backend (D47).
-FROM nginxinc/nginx-unprivileged:1.30-alpine-slim@sha256:5d8bb9437d74a600ec5dbf90c035451c724dc33eac8d3a71078f6f8612c345f6
+FROM nginxinc/nginx-unprivileged:1.31-alpine-slim@sha256:a8cb0f33d51fa107c96fd2bd3a71aaf564ec131e9d2bdf8700944f0ed8b170d7
 
 # TEMPORARY security fixes. The Trivy gate in CI (build-push.yml) fails the build when a fixable
 # HIGH/CRITICAL vulnerability is in the image. Our base image is pinned by digest, so it keeps
