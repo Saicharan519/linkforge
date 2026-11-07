@@ -44,6 +44,33 @@ Panels with no data are normal until the metric exists: labelled counters (`redi
 `rate_limit_rejections_total`, `redis_errors_total`, `click_events_processed_total`) get their first series on the first event.
 To change a panel, edit the JSON in git (an edit in the Grafana UI is lost when the sidecar reloads the ConfigMap).
 
+## Alerts
+
+11 rules in `charts/linkforge/alerts/linkforge-rules.yaml` (PrometheusRule `linkforge-alerts`, namespace `linkforge`):
+
+| Alert | Fires when | For | Severity |
+|---|---|---|---|
+| LinkForgeRedirectP95High | redirect p95 > 250 ms | 5 m | warning |
+| LinkForge5xxRatioHigh | 5xx > 2% of requests AND request rate > 0.1/s | 5 m | critical |
+| ClickStreamLagHigh | `max(click_stream_lag)` > 5000 | 5 m | warning |
+| ClickStreamPendingHigh | `max(click_stream_pending)` > 500 | 10 m | warning |
+| ClickStreamLengthHigh | `max(click_stream_length)` > 80000 (cap is 100000) | none | critical |
+| ClickEventsDropped | dropped-click rate > 0 | 5 m | warning |
+| RedisMemoryHigh | container working set > 205 MiB (80% of maxmemory 256 MB) | 5 m | warning |
+| LinkForgePodCrashLooping | a container is in CrashLoopBackOff | 5 m | critical |
+| LinkForgeTargetDown | an api/worker target has `up == 0` | 2 m | critical |
+| LinkForgeApiTargetMissing / LinkForgeWorkerTargetMissing | no such target exists at all | 5 m | critical |
+
+Test them (needs Docker; promtool comes from a digest-pinned image):
+
+```bash
+charts/linkforge/alerts/run-tests.sh
+```
+
+See what is firing: Prometheus `http://localhost:9090/alerts` or Alertmanager `http://localhost:9093` (port-forwards above).
+There is no Slack receiver, so nothing is delivered anywhere: `platform/monitoring/UNTESTED-seal-slack-webhook.sh` exists but has
+never been run. The `Watchdog` alert (always firing, from the chart) is expected and proves the Prometheus to Alertmanager path.
+
 ## Known limits (be honest about these)
 
 - **Chart version pinning does not pin image digests.** The chart pins image TAGS; a tag can be re-pointed. We
