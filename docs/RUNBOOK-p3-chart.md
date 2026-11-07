@@ -35,11 +35,13 @@ image that cannot run it. `worker.enabled: false` is a feature flag: the chart s
 early and you switch it on once the image underneath is ready (the same idea as the database
 expand/contract rule).
 
-**Everything that starts the application image needs the secret, including the migration Job.**
-`alembic` loads the app's settings, and the settings require `IP_HASH_SECRET`. If you ever see the
-`migrate` pods in `Error` with `ip_hash_secret Field required` in `kubectl -n linkforge logs
-job/migrate`, the new image reached the cluster before a chart that gives the Job the secret: push
-the chart (step 2) and refresh Argo; the old API pods keep serving meanwhile, nothing is lost.
+**Historical note (D71, D72).** The first version of this rollout needed the secret in the migration
+Job too, because `alembic` loaded the app's full settings. Since D72 alembic reads only
+`DATABASE_URL`, and the chart's Job no longer gets `IP_HASH_SECRET`. That is only safe with an image
+that contains D72 (`sha-2313f37` or newer). If you ever see the `migrate` pods in `Error` with
+`ip_hash_secret Field required` in `kubectl -n linkforge logs job/migrate`, an image older than D72
+is being run by a chart that no longer passes the secret: roll the image forward (or, as a stopgap,
+re-add the `ipHashSecretEnv` include to `migrate-job.yaml`). The old API pods keep serving meanwhile.
 
 **If the `migrate` pods keep failing AFTER you pushed the fix:** an Argo sync operation is pinned
 to the commit it started with, and its automatic retries reuse that commit, so the old, broken
