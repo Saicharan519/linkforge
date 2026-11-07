@@ -32,6 +32,18 @@ login (user `admin`) is for editing; its password lives only in the cluster Secr
 kubectl --context kind-linkforge -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d
 ```
 
+## The LinkForge dashboard
+
+`LinkForge overview` (uid `linkforge-overview`) is a ConfigMap rendered by the `linkforge` chart
+(`templates/dashboard.yaml`, JSON in `charts/linkforge/dashboards/linkforge.json`). Grafana's sidecar loads every
+ConfigMap labelled `grafana_dashboard=1`; there is nothing to import by hand. Switch it with
+`monitoring.dashboard.enabled` (on for kind). Open it through the Grafana port-forward at
+`http://localhost:3000/d/linkforge-overview`.
+
+Panels with no data are normal until the metric exists: labelled counters (`redirect_cache_total`,
+`rate_limit_rejections_total`, `redis_errors_total`, `click_events_processed_total`) get their first series on the first event.
+To change a panel, edit the JSON in git (an edit in the Grafana UI is lost when the sidecar reloads the ConfigMap).
+
 ## Known limits (be honest about these)
 
 - **Chart version pinning does not pin image digests.** The chart pins image TAGS; a tag can be re-pointed. We
