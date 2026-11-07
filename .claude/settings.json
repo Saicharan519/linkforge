@@ -9,7 +9,16 @@
       "Bash(terraform import *)",
       "Bash(terraform state rm *)",
       "Bash(terraform force-unlock *)",
+      "Bash(terraform plan)",
+      "Bash(terraform plan *)",
+      "Bash(terraform init)",
       "Bash(aws *)",
+      "Bash(AWS_PROFILE=* *)",
+      "Bash(*--profile*)",
+      "Bash(*.aws/*)",
+      "Bash(*.aws *)",
+      "Bash(env)",
+      "Bash(printenv *)",
       "Bash(kubectl delete *)",
       "Bash(kubectl apply *)",
       "Bash(helm install *)",
@@ -22,7 +31,9 @@
       "Read(./**/*.tfstate)",
       "Read(./**/*.tfstate.*)",
       "Read(./**/tfplan)",
+      "Read(./**/terraform.tfvars)",
       "Read(~/.aws/**)",
+      "Read(**/.aws/**)",
       "Read(~/.ssh/**)"
     ]
   }

@@ -16,7 +16,7 @@ URL shortener + click analytics platform. Placement/portfolio project: must be c
 - Frontend: React + TypeScript + Vite + Tailwind + shadcn/ui + Recharts + TanStack Query + React Router
 - Data: PostgreSQL 16, Redis 7 (AOF on)
 - Infra: Docker, GitHub Actions, Terraform, kind (local K8s), EKS (cloud), Helm, Argo CD, Sealed Secrets, kube-prometheus-stack, k6
-- Region ap-south-1. Two repos: `linkforge` (this one: app + Terraform) and `linkforge-gitops` (Helm chart + Argo apps).
+- Region ap-southeast-2 (Sydney; the only region this AWS account can use, D76). Two repos: `linkforge` (this one: app + Terraform) and `linkforge-gitops` (Helm chart + Argo apps).
 
 ## Commands
 ```

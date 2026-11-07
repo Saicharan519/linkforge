@@ -5,7 +5,7 @@
 infra/
   terraform/
     bootstrap/     # S3 state bucket (local state, run once)
-    foundation/    # GitHub OIDC provider+role, ECR repos, Route53 hosted zone (added in P9 prereq)  — cheap, keep forever
+    foundation/    # (D76: NOT built now.) Was: GitHub OIDC provider+role, ECR repos, Route53 zone; only the Route53 zone may come back with P9
     cloud/         # VPC, EKS, RDS, ACM + DNS records, LB-controller IRSA      — costs money, destroy after demo
     modules/       # ecr/ github-oidc/ rds/ dns/ (own modules). VPC+EKS use terraform-aws-modules.
   kind/            # kind-config.yaml, metrics-server patch notes
@@ -26,6 +26,7 @@ Separate repo `linkforge-gitops`: `charts/linkforge/`, `envs/kind/values.yaml`, 
 - RDS (demo): private subnets, `backup_retention_period = 1`, `skip_final_snapshot = true`, `deletion_protection = false` — with a comment saying why (disposable) and what production would do.
 - Pin everything: provider versions (`~>`), module versions, Docker base tags (no `latest`), GitHub Actions by full commit SHA, Helm chart versions, Argo CD version.
 - Docker: multi-stage, non-root, `.dockerignore`, `HEALTHCHECK` for compose, no secrets in layers. One backend image, API and worker via different `command`.
+- **D76 (overrides every OIDC/ECR/region statement in this file where they conflict).** The AWS account is a Builder-ID "new experience" account: one fixed region (ap-southeast-2) and an AWS-managed policy that denies `iam:*Provider*`, so the GitHub OIDC provider cannot be created. There is therefore NO ECR push from CI and no OIDC role: images stay on public GHCR for kind AND EKS (nodes pull public GHCR images without credentials), and no AWS keys exist in GitHub. The OIDC/ECR design is documented, not implemented; revisit if the project moves to a standard account. Humans use an IAM user with a narrowly scoped policy (see `infra/terraform/bootstrap/README.md`); Claude never reads, runs with, or asks for those credentials.
 - Image tag = short git SHA. Never deploy `latest`. Registries (D5): CI pushes to **public GHCR** with `GITHUB_TOKEN` from P1S (kind pulls it; `kind load` only for local iteration); P6 adds an OIDC push to **ECR** (immutable tags) which EKS pulls natively.
 - Also in CI/repo (D19): Dependabot (actions, pip, npm, docker, terraform), Checkov on `infra/terraform`, gitleaks pre-commit. k3s on EC2 is a documented fallback only (D2): do not build it unless EKS is blocked.
 - CI gates: ruff + pytest (service containers) + frontend lint/typecheck/test/build; then Trivy `fs` and `image` with `--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1`. Exceptions only via `.trivyignore` with justification + expiry date.

@@ -6,6 +6,7 @@ Every section: **What / Why here / How / Verify / How it works / Break it / Inte
 
 > Verify versions and flags against official docs when you run them — tools move fast. Where I say "check", I mean it.
 > **Environment (D20):** run every command in **WSL2 (Ubuntu)**, not PowerShell. Keep the repo outside OneDrive. Cap WSL memory in `%UserProfile%\.wslconfig` (`[wsl2]` / `memory=8GB` / `processors=4`, then `wsl --shutdown`). Where a command says `brew install`, on WSL use the tool's release binary or `apt`/Homebrew-on-Linux instead.
+> **D76 changes this guide for this project.** The AWS account is a Builder-ID "new experience" account: its only region is `ap-southeast-2` (Sydney; every `ap-southeast-2` below now says that), and an AWS-managed policy blocks creating the GitHub OIDC provider. So the OIDC + ECR parts of this guide (the CI diagram, §3, §6) describe what a STANDARD account would do and are kept for learning and interviews; they are NOT implemented here. In this project CI pushes to public GHCR and both kind and EKS pull from it.
 > **Decisions:** see `docs/DECISIONS.md`. Key ones for this guide: images go to public GHCR for kind and ECR for EKS (D5); Helm values are `envs/kind` and `envs/eks` (D6).
 
 ---
@@ -132,7 +133,7 @@ cd infra/terraform/bootstrap && terraform init && terraform plan && terraform ap
 cd ../foundation
 # backend block (in backend.tf):
 #   terraform { backend "s3" { bucket="linkforge-tfstate-<ACCOUNT_ID>" key="foundation/terraform.tfstate"
-#               region="ap-south-1" use_lockfile=true encrypt=true } }
+#               region="ap-southeast-2" use_lockfile=true encrypt=true } }
 terraform init && terraform fmt -check && terraform validate && terraform plan -out tfplan
 terraform apply tfplan
 terraform plan                           # must say "No changes" (no drift)
@@ -152,7 +153,7 @@ terraform plan                           # must say "No changes" (no drift)
 **Do once (console, ~30 min):**
 1. Root account: enable MFA, then stop using root. For daily work use **IAM Identity Center** (short-lived SSO sessions: `aws configure sso`, `aws sso login`). A long-lived IAM user with access keys is the thing we're trying to avoid; if you must use an IAM user for now, MFA + no keys in files, and plan to move to Identity Center.
 2. Billing → **Budgets**: create a monthly cost budget with email alerts at $5, $20, $50 (and a forecast alert). Billing → **Free Tier / Credits** page: note what you have and when it expires. A Free Plan account can be closed when credits or the time window end — read the terms on your account page; don't assume "5 months free" covers EKS.
-3. Region: `ap-south-1` everywhere. Check you're in the right region before you panic about "missing" resources.
+3. Region: `ap-southeast-2` everywhere. Check you're in the right region before you panic about "missing" resources.
 
 **GitHub OIDC (Terraform creates it in `foundation/`):**
 - An OIDC identity provider for `token.actions.githubusercontent.com` + an IAM role that GitHub Actions can assume.
@@ -174,7 +175,7 @@ terraform plan                           # must say "No changes" (no drift)
 - Workflow side: `permissions: { id-token: write, contents: read }`, then `aws-actions/configure-aws-credentials` (with `role-to-assume`) and `aws-actions/amazon-ecr-login` (both pinned by SHA).
 **How it works:** GitHub signs a short-lived JWT per workflow run stating repo/branch; AWS verifies it against GitHub's public keys and, if the `sub` matches the trust condition, issues temporary credentials. No long-lived keys exist to leak. Without the `sub` condition, *any* GitHub repo could assume your role — the condition IS the security.
 **ECR:** `image_tag_mutability = IMMUTABLE` (a tag can't be overwritten → SHA tags are trustworthy), scan-on-push on, lifecycle policy to keep last ~20 images (storage costs money).
-**Verify:** a push to main assumes the role (see the step in the Actions log); a push from a different branch fails to assume it. `aws ecr list-images --repository-name linkforge-api --region ap-south-1`.
+**Verify:** a push to main assumes the role (see the step in the Actions log); a push from a different branch fails to assume it. `aws ecr list-images --repository-name linkforge-api --region ap-southeast-2`.
 **Break it:** change the `sub` condition to a wrong branch → assume fails with AccessDenied; read the message.
 **Interview Qs:** why OIDC over access keys? what's in the trust policy vs permissions policy? what is `sub`? why immutable tags? what's least privilege here? IAM user vs role vs IRSA (for pods)?
 
@@ -428,7 +429,7 @@ For each: what you did, what you saw (screenshot/number), what you'd improve.
 
 **How your "free" account actually works.** New AWS accounts get a pool of **credits** (up to $100 at signup + up to $100 for activities, per AWS's current terms — check *your* Billing → Free Tier/Credits page for your balance and expiry). The free plan ends after 6 months or when credits run out, whichever is first; then the account is suspended and, if you don't upgrade within the grace period (90 days per AWS), erased. Credits are dollars, not free hours: EKS draws them down like anything else, and some services may be blocked on a free-plan account — verify EKS actually works on yours before planning around it.
 
-**What EKS costs (rough; check the AWS pricing pages for ap-south-1):** EKS control plane $0.10/hour ≈ $73/month (≈ $2.40/day) — only stops when the cluster is **deleted**; stopping or scaling nodes does NOT stop it. NAT gateway ≈ $33/mo + data, ALB ≈ $16/mo, 2× t3.medium ≈ $60/mo, RDS db.t4g.micro + storage ≈ $15–20/mo. Left running ≈ **$150–200/month**. A 4-hour demo ≈ $1–3 — a few such demos fit inside the credit pool. The killer is forgetting it.
+**What EKS costs (rough; check the AWS pricing pages for ap-southeast-2):** EKS control plane $0.10/hour ≈ $73/month (≈ $2.40/day) — only stops when the cluster is **deleted**; stopping or scaling nodes does NOT stop it. NAT gateway ≈ $33/mo + data, ALB ≈ $16/mo, 2× t3.medium ≈ $60/mo, RDS db.t4g.micro + storage ≈ $15–20/mo. Left running ≈ **$150–200/month**. A 4-hour demo ≈ $1–3 — a few such demos fit inside the credit pool. The killer is forgetting it.
 **"Pause" doesn't exist for EKS.** The pattern is *create → use → destroy → recreate later* (that's why `foundation/` is separate from `cloud/`). Expect ~10–15 min to create and ~10–15 min to destroy, and an empty database each time. (RDS can be stopped up to 7 days, but the rest keeps billing — not worth it.)
 
 Rules:
@@ -436,7 +437,7 @@ Rules:
 2. Do P9 + P10 in one sitting. Calendar reminder for the destroy.
 3. **Keep the Route53 hosted zone in `foundation/`** ($0.50/mo): its nameservers stay the same across rebuilds, so you set them at your registrar once. `cloud/` only adds records + ACM validation.
 4. **Destroy order:** (a) delete the Argo apps (root) so the Ingress is removed and the LB Controller deletes the ALB/target groups — if you `terraform destroy` first, orphaned ALBs/ENIs/security groups can block VPC deletion; (b) `cd infra/terraform/cloud && terraform destroy`; (c) console checklist below; (d) keep `foundation/` (ECR + OIDC + zone ≈ $0.50/mo).
-5. **Console checklist after destroy (ap-south-1):** EKS clusters · EC2 instances · EBS volumes and snapshots (PVCs create these) · Load Balancers + target groups · NAT gateways · **Elastic IPs** · ENIs/security groups left in the VPC · RDS instances, **snapshots**, retained backups · CloudWatch log groups (EKS/RDS logs) · Route53 *records* in the zone. A domain registration is a **separate purchase** — deleting a hosted zone doesn't cancel it or its renewal.
+5. **Console checklist after destroy (ap-southeast-2):** EKS clusters · EC2 instances · EBS volumes and snapshots (PVCs create these) · Load Balancers + target groups · NAT gateways · **Elastic IPs** · ENIs/security groups left in the VPC · RDS instances, **snapshots**, retained backups · CloudWatch log groups (EKS/RDS logs) · Route53 *records* in the zone. A domain registration is a **separate purchase** — deleting a hosted zone doesn't cancel it or its renewal.
 6. Next day: Billing → Cost Explorer → daily cost ≈ $0 (the zone + a few cents of ECR/S3).
 7. **Your credits expire 2027-04-28 (D3)** — balance seen 2026-11-05: $96.23. Schedule the EKS session no later than ~March 2027. A **domain is real money** (check Route53 pricing for your TLD) and credits may not cover it: check before buying. EKS cannot be paused — create, use, destroy.
 8. Before creating anything new, open Cost Explorer grouped by **Service** and explain the small charges already on the account (~$2/month seen), so you know what is running.
