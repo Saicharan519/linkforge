@@ -1,10 +1,23 @@
+# Everything listed here is excluded from the BUILD CONTEXT: the files Docker sends to the daemon
+# (and so from `COPY . .` in the build stage). Smaller context = faster builds, and nothing secret
+# or irrelevant can end up in an image layer.
+
+# Installed and built inside the image from package-lock.json: a copy from your machine could be
+# for another operating system, or stale.
 node_modules/
 dist/
+
+# Secrets and local config: must never end up in an image
 .env
 .env.*
+*.local
 *.pem
-CLAUDE.md
-*.md
+
+# Not needed to build
+coverage/
+.git
+.gitignore
 Dockerfile
 .dockerignore
-.git
+CLAUDE.md
+*.md

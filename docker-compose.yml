@@ -1,8 +1,13 @@
 # Local stack for development and tests.
 #   docker compose up -d postgres redis     -> only the dependencies (run the app yourself with uvicorn)
 #   docker compose up --build api           -> postgres + one-shot migration + the API in a container
-# The worker is added in P3; the frontend here is a placeholder page until P4/P5. Credentials are throwaway local values;
-# override them with a gitignored .env file if you like.
+#   docker compose up --build               -> everything: the app on http://localhost:8080
+#                                              (nginx serves the UI and forwards /api to the API),
+#                                              the API alone on :8000 (short links open there),
+#                                              the click worker, Postgres and Redis.
+# Start-up order is enforced by `depends_on` + healthchecks: Postgres healthy -> migrate finishes ->
+# API healthy -> frontend. Credentials are throwaway local values; override them with a
+# gitignored .env file if you like.
 
 # Shared by `migrate` and `api`: the SAME image, built once from ./backend. YAML anchors (&name /
 # <<: *name) are just copy-paste avoidance, Compose has no special meaning for them.
@@ -24,6 +29,12 @@ x-backend: &backend
     # Hostname of the PUBLIC short-link host. Empty = no host guard (everything served on any host).
     # To try the guard locally: PUBLIC_REDIRECT_HOST=go.example.com docker compose up -d api
     PUBLIC_REDIRECT_HOST: ${PUBLIC_REDIRECT_HOST:-}
+    # How many of OUR proxies sit in front of the API. In this stack the nginx in the frontend
+    # container forwards /api and OVERWRITES X-Forwarded-For with the address it saw, so exactly
+    # one hop is trusted (ARCHITECTURE section 6.3). Direct calls to :8000 carry no such header and
+    # fall back to the connection address. (Seen from a browser on this machine, every visitor
+    # shares the Docker gateway address: fine locally, real clients differ on kind and EKS.)
+    TRUSTED_PROXY_COUNT: "1"
     ENV: dev
     SHORT_URL_BASE: http://localhost:8000
 
@@ -77,12 +88,18 @@ services:
     healthcheck:
       disable: true # the image's check probes the API's port; the worker has none
 
-  # Placeholder static page (P1S.2); becomes the real SPA in P4/P5.
+  # The web app (P5.2): the built React app behind nginx, which also forwards /api/ to the API
+  # container, so the browser talks to ONE origin (http://localhost:8080) and needs no CORS.
+  # Its HEALTHCHECK comes from the image. Waits for a HEALTHY API: opening the UI before the API
+  # can answer would show errors.
   frontend:
     build: ./frontend
     image: linkforge-frontend:dev
     ports:
       - "127.0.0.1:8080:8080"
+    depends_on:
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
   postgres:
@@ -106,8 +123,24 @@ services:
 
   redis:
     image: redis:7.4
-    # AOF on (ARCHITECTURE §5.1). Memory limits/eviction policy are added with the Redis work in P2.
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    # The same flags as the Kubernetes chart (ARCHITECTURE section 5.1, D64), so local behaves like
+    # the cluster: AOF on (survives a restart), fsync every second, a 256 MB memory cap and
+    # `noeviction` (when full, Redis REFUSES writes instead of silently dropping data such as
+    # sessions and queued clicks), and the AOF is rewritten when it doubles past 64 MB.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - noeviction
+      - --auto-aof-rewrite-percentage
+      - "100"
+      - --auto-aof-rewrite-min-size
+      - 64mb
     ports:
       # REDIS_PORT: e.g. when a Redis installed on the machine itself already owns 6379.
       - "127.0.0.1:${REDIS_PORT:-6379}:6379"
