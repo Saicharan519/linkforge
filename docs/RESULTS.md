@@ -91,3 +91,23 @@ $ kubectl top nodes
 linkforge-control-plane   597m   4%   2403Mi   30%
 ```
 
+
+## P5: images and the full compose stack (2026-11-07)
+
+Run from a clean `git clone` of commit 264ae81 with `docker compose -p lfclean up -d --build --wait` (own volumes, removed afterwards).
+
+| What | Result |
+|---|---|
+| All services healthy | postgres, redis, api, frontend healthy; migrate exited 0; worker up (its healthcheck is disabled on purpose) |
+| Image sizes | `linkforge-api:dev` 324 MB, `linkforge-frontend:dev` 33.6 MB |
+| Frontend image contents | nginx 1.30-alpine-slim + 1.88 MB of built app; no Node, no sources; musl and zlib upgraded (temporary, see Dockerfile) |
+| Users (`id` inside the containers) | api and worker `uid=10001(app)`, frontend `uid=101(nginx)`; none is root |
+| Security headers on `/` and `/assets/*` | CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy present on both; `/` is `no-cache`, hashed assets `max-age=31536000, immutable` |
+| SPA fallback / missing asset | `/app/links` 200 (index.html), `/assets/nope.js` 404 |
+| `/api` through nginx | `GET /api/v1/auth/me` without a session: 401 JSON from the API; register 201, login 200, create link 201, all through :8080 with the CSRF and Origin rules |
+| Redirect and analytics | `GET :8000/cleanck` 302 to the destination; 3 clicks with a referrer plus 1 without: total 4, referrers news.example.com 3 and (direct) 1, device desktop, browser Chrome (through the worker, read back through the proxy) |
+| Redis | `appendonly yes`, `maxmemory-policy noeviction` |
+| Browser (built-in), image served on :8080 | login, dashboard with chart and fonts, Links, the New link dialog (scroll lock) all work; console had one error: the 401 from the first `/auth/me` check on the login page (expected); no CSP violation |
+| Trivy, local, same binary and flags as CI (0.76.2, `--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1`) | frontend image and API image (the compose-built `linkforge-api:dev`): 0 findings each, exit code 0 |
+
+NOT measured: image size over time, build time in CI, container memory under the real SPA on kind (until the new image is rolled out).
