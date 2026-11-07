@@ -61,9 +61,10 @@ def test_the_application_settings_extend_the_database_settings() -> None:
 
     assert issubclass(Settings, DatabaseSettings)
     assert "database_url" in DatabaseSettings.model_fields
-    # Nothing unrelated sneaks in (D72: a migration must not need the HMAC secret). The two TLS fields are
-    # the deliberate exception (D85): the migration talks to the same database the app does, so it needs
-    # the same TLS settings. Only database_url is REQUIRED; the TLS fields default to plain TCP.
+    # Nothing unrelated sneaks in (D72: a migration must not need the HMAC secret). The two TLS
+    # fields are the deliberate exception (D85): the migration talks to the same database the
+    # app does, so it needs the same TLS settings. Only database_url is REQUIRED; the TLS
+    # fields default to plain TCP.
     assert set(DatabaseSettings.model_fields) == {
         "database_url",
         "database_ssl_mode",
