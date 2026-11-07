@@ -48,6 +48,13 @@ ENV PATH="/opt/venv/bin:$PATH" \
 WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
+
+# Nothing at run time installs packages, so the package installer must not be in the image: it is
+# one more thing to patch (Trivy lists it) and a tool for anyone who got a shell. Two copies exist:
+# the one inside the venv we just copied, and the one of the base image's own Python.
+RUN python -m pip uninstall -y pip \
+ && /usr/local/bin/python -m pip uninstall -y pip
+
 # Application code and migrations. Tests and dev tools are excluded by .dockerignore.
 # Root-owned and read-only to the app user: the running app cannot modify its own code.
 COPY app ./app
