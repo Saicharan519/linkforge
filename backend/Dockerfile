@@ -39,6 +39,14 @@ FROM ${PYTHON_IMAGE} AS runtime
 RUN groupadd --gid 10001 app \
  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app
 
+# TEMPORARY (same pattern as the frontend image): the Debian base ships a zlib1g that Trivy flags until the
+# base image is rebuilt upstream. We upgrade just that package ourselves (needs root; USER 10001 below drops it).
+#  - 2026-11-07 zlib1g: CVE-2026-85091 and CVE-2026-76844 (HIGH, fixed in 1:1.3.dfsg+really1.3.1-1+deb13u1)
+# REMOVE this block when a bumped base digest scans clean on its own (Dependabot).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
+ && rm -rf /var/lib/apt/lists/*
+
 ENV PATH="/opt/venv/bin:$PATH" \
     # Logs go straight to stdout/stderr (no buffering): `docker logs` and Kubernetes see them live.
     PYTHONUNBUFFERED=1 \
