@@ -20,6 +20,8 @@ dist/
 !.env.example
 sealed-secrets-key-backup.yaml
 *.pem
+# ...except the Amazon RDS CA bundle: public CA certificates, no keys (backend/certs/README.md)
+!backend/certs/rds-global-bundle.pem
 
 # Terraform (state and plans can contain secrets)
 .terraform/

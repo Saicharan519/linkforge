@@ -15,6 +15,8 @@ htmlcov/
 .env
 .env.*
 *.pem
+# ...except the Amazon RDS CA bundle (public certificates) that the image trusts for the database
+!certs/rds-global-bundle.pem
 
 # Not needed at runtime
 tests/

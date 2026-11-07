@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from app.config import DatabaseSettings
+from app.db import database_connect_args
 from app.models import Base
 
 config = context.config
@@ -23,7 +24,8 @@ target_metadata = Base.metadata
 # One source of truth for the URL: DATABASE_URL, read through DatabaseSettings so that nothing
 # else is required (a migration must not need the HMAC secret). "%" is doubled because Alembic's
 # config parser treats a single "%" as interpolation syntax.
-config.set_main_option("sqlalchemy.url", DatabaseSettings().database_url.replace("%", "%%"))
+db_settings = DatabaseSettings()
+config.set_main_option("sqlalchemy.url", db_settings.database_url.replace("%", "%%"))
 
 
 def run_migrations_offline() -> None:
@@ -51,6 +53,9 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        # The same TLS settings and connect timeout as the running app (D85): the migration Job
+        # talks to RDS exactly like the API does.
+        connect_args=database_connect_args(db_settings),
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

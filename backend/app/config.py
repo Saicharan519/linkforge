@@ -4,20 +4,22 @@ Config comes ONLY from environment variables (pydantic-settings). Nothing is rea
 and no secrets have defaults. Names and defaults follow docs/ARCHITECTURE.md §9.1.
 """
 
+import os
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class DatabaseSettings(BaseSettings):
-    """The ONE setting a database migration needs.
+    """The settings a database migration needs: where the database is and how to talk to it.
 
     Alembic uses this instead of the full `Settings`, so a migration can run with nothing but
-    `DATABASE_URL`: it does not need (and must not be given) the HMAC secret or any other setting
-    of the running application. (It used to load `Settings`, and the click-event image then
-    refused to migrate without `IP_HASH_SECRET`; see decision D72.)
+    `DATABASE_URL` (plus the TLS settings when the database needs them): it does not need (and
+    must not be given) the HMAC secret or any other setting of the running application. (It used
+    to load `Settings`, and the click-event image then refused to migrate without
+    `IP_HASH_SECRET`; see decision D72.)
     """
 
     # extra="ignore": the environment also holds variables for other services (e.g. POSTGRES_USER
@@ -26,6 +28,31 @@ class DatabaseSettings(BaseSettings):
 
     # Required, no default: failing fast at startup beats silently connecting to a guessed database.
     database_url: str
+
+    # TLS to the database (decisions D14 and D85). Same meaning as libpq's sslmode:
+    #   disable      plain TCP (local Postgres, kind, docker compose)
+    #   require      encrypted, the server certificate is NOT checked (protects against a passive
+    #                eavesdropper only, not against someone impersonating the server)
+    #   verify-ca    encrypted and the certificate must chain to DATABASE_SSL_CA_FILE
+    #   verify-full  as verify-ca, and the certificate must also name the host we connected to
+    # RDS uses verify-full with the RDS CA bundle that is baked into the image.
+    database_ssl_mode: Literal["disable", "require", "verify-ca", "verify-full"] = "disable"
+    database_ssl_ca_file: str | None = None
+
+    @model_validator(mode="after")
+    def _ssl_settings_are_consistent(self) -> "DatabaseSettings":
+        # Fail at start-up, not on the first query: a verify mode without a CA file would otherwise
+        # either fail every connection or (worse) be silently weaker than it claims.
+        if self.database_ssl_mode in ("verify-ca", "verify-full"):
+            if not self.database_ssl_ca_file:
+                raise ValueError(
+                    f"DATABASE_SSL_MODE={self.database_ssl_mode} needs DATABASE_SSL_CA_FILE"
+                )
+            if not os.path.isfile(self.database_ssl_ca_file):
+                raise ValueError(
+                    f"DATABASE_SSL_CA_FILE does not exist: {self.database_ssl_ca_file}"
+                )
+        return self
 
 
 class Settings(DatabaseSettings):
