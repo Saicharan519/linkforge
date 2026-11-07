@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. Nothing here is a secret, but the account id is kept out of git.
+allowed_account_id = "123456789012" # your 12-digit AWS account id
+
+# Who may reach the Kubernetes API: your public IP as a /32 (curl -s https://checkip.amazonaws.com).
+admin_cidrs = ["203.0.113.7/32"]
+
+# Nodes. Check eligibility and pod capacity first (README, "Before the first apply").
+# node_instance_types = ["m7i-flex.large"]
+# node_min_size       = 2
+# node_desired_size   = 2
+# node_max_size       = 3
+# ...or three small nodes:
+# node_instance_types = ["t3.medium"]
+# node_min_size       = 3
+# node_desired_size   = 3
+# node_max_size       = 4
+
+# Optional domain mode (leave out for HTTP mode): a domain whose Route53 hosted zone already exists.
+# domain_name = "example.com"

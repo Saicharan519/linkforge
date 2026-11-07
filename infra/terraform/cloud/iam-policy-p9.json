@@ -1,0 +1,123 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StateBucketOnly",
+      "Effect": "Allow",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::linkforge-tfstate-<ACCOUNT_ID>",
+        "arn:aws:s3:::linkforge-tfstate-<ACCOUNT_ID>/*"
+      ]
+    },
+    {
+      "Sid": "ListBuckets",
+      "Effect": "Allow",
+      "Action": "s3:ListAllMyBuckets",
+      "Resource": "*"
+    },
+    {
+      "Sid": "NetworkAndNodesInSydneyOnly",
+      "Effect": "Allow",
+      "Action": "ec2:*",
+      "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "ap-southeast-2" } }
+    },
+    {
+      "Sid": "EksInSydneyOnly",
+      "Effect": "Allow",
+      "Action": "eks:*",
+      "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "ap-southeast-2" } }
+    },
+    {
+      "Sid": "RdsInSydneyOnly",
+      "Effect": "Allow",
+      "Action": "rds:*",
+      "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "ap-southeast-2" } }
+    },
+    {
+      "Sid": "LoadBalancerReadAndCleanup",
+      "Effect": "Allow",
+      "Action": ["elasticloadbalancing:*", "autoscaling:Describe*"],
+      "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "ap-southeast-2" } }
+    },
+    {
+      "Sid": "IamRolesPoliciesNamedLinkforgeOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:UpdateRole", "iam:UpdateAssumeRolePolicy",
+        "iam:TagRole", "iam:UntagRole", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
+        "iam:GetRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:ListInstanceProfilesForRole",
+        "iam:CreatePolicy", "iam:DeletePolicy", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions",
+        "iam:CreatePolicyVersion", "iam:DeletePolicyVersion", "iam:TagPolicy", "iam:UntagPolicy",
+        "iam:CreateInstanceProfile", "iam:DeleteInstanceProfile", "iam:GetInstanceProfile",
+        "iam:AddRoleToInstanceProfile", "iam:RemoveRoleFromInstanceProfile", "iam:TagInstanceProfile"
+      ],
+      "Resource": [
+        "arn:aws:iam::<ACCOUNT_ID>:role/linkforge-*",
+        "arn:aws:iam::<ACCOUNT_ID>:policy/linkforge-*",
+        "arn:aws:iam::<ACCOUNT_ID>:instance-profile/linkforge-*"
+      ]
+    },
+    {
+      "Sid": "AttachOnlyTheManagedPoliciesThisStackUses",
+      "Effect": "Allow",
+      "Action": ["iam:AttachRolePolicy", "iam:DetachRolePolicy"],
+      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/linkforge-*",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PolicyARN": [
+            "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+            "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+            "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+            "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+            "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy",
+            "arn:aws:iam::<ACCOUNT_ID>:policy/linkforge-*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "PassOnlyLinkforgeRolesToTheServicesThatNeedThem",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/linkforge-*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": ["eks.amazonaws.com", "ec2.amazonaws.com", "pods.eks.amazonaws.com"]
+        }
+      }
+    },
+    {
+      "Sid": "ServiceLinkedRolesForEksElbRds",
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "iam:AWSServiceName": [
+            "eks.amazonaws.com",
+            "eks-nodegroup.amazonaws.com",
+            "elasticloadbalancing.amazonaws.com",
+            "rds.amazonaws.com",
+            "autoscaling.amazonaws.com"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "OptionalDomainModeAcmAndRoute53",
+      "Effect": "Allow",
+      "Action": [
+        "acm:*",
+        "route53:ListHostedZones", "route53:ListHostedZonesByName", "route53:GetHostedZone",
+        "route53:ListResourceRecordSets", "route53:ChangeResourceRecordSets", "route53:GetChange",
+        "route53:ListTagsForResource"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
