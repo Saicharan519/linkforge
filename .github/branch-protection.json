@@ -1,0 +1,26 @@
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "backend (ruff + pytest)",
+      "frontend (eslint + tsc + vitest + build)",
+      "terraform (fmt + validate + checkov)",
+      "trivy (repository files)",
+      "images (build + trivy) (api, backend)",
+      "images (build + trivy) (frontend, frontend)",
+      "dependency audit (pip-audit + npm audit)",
+      "secret scan (gitleaks)"
+    ]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": {
+    "required_approving_review_count": 0,
+    "dismiss_stale_reviews": false,
+    "require_code_owner_reviews": false
+  },
+  "restrictions": null,
+  "required_linear_history": false,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "required_conversation_resolution": false
+}
