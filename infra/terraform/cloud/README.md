@@ -39,8 +39,9 @@ object, the SealedSecret with the database URL, a Route53 zone, a domain.
    aws ec2 describe-instance-types --region ap-southeast-2 --instance-types t3.medium m7i-flex.large --query 'InstanceTypes[].[InstanceType,VCpuInfo.DefaultVCpus,MemoryInfo.SizeInMiB,NetworkInfo.MaximumNetworkInterfaces,NetworkInfo.Ipv4AddressesPerInterface]' --output text
    aws service-quotas get-service-quota --region ap-southeast-2 --service-code ec2 --quota-code L-1216C47A --query 'Quota.Value'
    ```
-   Max pods per node = ENIs x (IPs per ENI - 1) + 2 (t3.medium: 17). Count about 5 pod slots per node for DaemonSets. About 32 pods are
-   needed at 2 API replicas and about 37 at the HPA maximum of 6 (P9 plan), so `3 x t3.medium` fits and `2 x t3.medium` does not. The vCPU quota
+   Max pods per node = ENIs x (IPs per ENI - 1) + 2 (t3.medium: 17). Count about 4 pod slots per node for DaemonSets. Computed in
+   `linkforge-gitops/envs/eks/README.md` (D87): 24 pods at rest and about 29 at the HPA maximum with monitoring off (+4 for lean monitoring), so `2 x t3.medium` (34 slots) barely fits and
+   `3 x t3.medium` has room; the earlier estimate of 32-37 assumed full monitoring. The vCPU quota
    must cover nodes x 2. AWS's Free-plan EC2 list (accounts from 2025-07-15) is `t3.micro`, `t3.small`, `t4g.micro`, `t4g.small`,
    `c7i-flex.large`, `m7i-flex.large`: `t3.medium` is NOT on it, which is why the default is `m7i-flex.large`. Whether this account really
    may launch a type is only known when the node group is created.
