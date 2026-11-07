@@ -23,7 +23,7 @@ pydantic_core==2.50.4
 python-dotenv==1.2.4
 PyYAML==6.0.3
 redis==8.1.0
-SQLAlchemy==2.0.57
+SQLAlchemy==2.1.8
 starlette==1.10.0
 typing-inspection==0.4.5
 ua-parser==1.0.2
