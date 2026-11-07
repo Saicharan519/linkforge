@@ -129,8 +129,7 @@ over the whole run window (this includes the HPA scale-up at the start of run A)
 code means a 100% cache hit; a single-node kind cluster on a fast machine is not EKS; the client-side numbers in C exclude any real network.
 
 **Autoscaling (run A, 200 req/s):** in the 15 s samples the HPA showed desired 4 at the second sample (CPU 106%), desired 6 (the maximum) by 62 s and 6 running pods at 77 s, all counted from the first sample (k6 itself started a little later); per-pod API CPU peaked at 0.32 cores (requests are small, so the
-HPA reads 160-270% of request). No failed request during the scale-up. Redis working set peaked at 14.7 MiB (alert line 205 MiB). The worker used about 0.4-0.5 CPU cores in both A and B (200/s and 50/s):
-it does not look proportional to the click rate (probable busy loop; NOT investigated).
+HPA reads 160-270% of request). No failed request during the scale-up. Redis working set peaked at 14.7 MiB (alert line 205 MiB). The worker used about 0.4-0.5 CPU cores in both A and B (200/s and 50/s). CORRECTED in P8.5: that is its 500m CPU LIMIT, not a busy loop (73% of its CFS periods were throttled over the drills).
 
 **Click accounting (run A + earlier 15 s smoke):** requests sent about 36,738 (+/- 1), rows stored in Postgres 36,732, `click_events_dropped_total` 6 (2 on each of the 3 api pods the HPA added):
 the gap is the dropped count. Rollup sum equals row count (36,732 = 36,732). Stream lag peaked at 17, pending at 23; both back to near 0 at the end. In run C, with 6 warm pods, 0 clicks were dropped.
@@ -151,4 +150,36 @@ not its edge behaviour.
 
 **NOT done / NOT verified:** the "break it" step (raise the rate until errors appear and name the bottleneck); a run with a real network between client and cluster; the scale-DOWN timing (P8.5 CPU drill); the
 create scenario at higher rates; any run on EKS. Screenshots of the dashboard during the runs were not taken (P8.5 does that under drills).
+
+## P8.5: failure drills on kind (2026-11-07)
+
+Method: k6 (100 req/s warm redirects, from this machine, client-side) plus a small probe (5 redirects/s and 1 login attempt/s with a different bogus e-mail each time, timeline in `~/runlogs/probe-*.log`)
+running during every drill; app rate limits raised for the drills and **reverted** (gitops 4ebbd9a). Click accounting = clicks sent (k6 302s + probe 302s) against rows added to `click_events` in Postgres.
+Dashboard evidence: the "LinkForge overview" dashboard for the whole hour was looked at in the built-in browser (lag ramp to about 40k and drain, Redis working set stepping over the 205 MiB line,
+HPA at 6, API CPU plateaus); the screenshot was NOT saved to the repo.
+Pass criteria are the ones in DEVOPS_GUIDE §13 (targets we chose).
+
+| Drill | What was done | Measured | Pass? |
+|---|---|---|---|
+| Kill an API pod | `kubectl delete pod <one api pod>` under 100 req/s, started with 2 pods (the load itself made the HPA add pods) | k6: 24,000 requests, 23,998 x 302, 2 failed (0.008%), p95 196 ms, max 2.1 s. Probe in the 80 s after: 180 x 302, 0 errors. A new pod was Ready within 7 s (could be an HPA-added pod, not necessarily the replacement). Clicks: sent 24,501, stored 24,492, 9 not stored (0.04%). | 5xx < 1% yes; replacement Ready < 60 s yes; always at least one pod serving yes |
+| Kill Redis | `kubectl delete pod redis-0` under 100 req/s, 6 api pods running | Redis Ready and answering PING in 6 s. k6: 24,000 / 24,000 x 302 (p95 147 ms, max 2.76 s). Probe during the outage (about 8 s): 21 x 302, avg 143 ms against 53 ms normal (Postgres fallback). Login attempts: 2 x 503 (fail closed), 401 otherwise. **Clicks lost: 595 of 24,511 sent (2.4%), equal to the `click_events_dropped_total` increase (595).** AOF: loading 0, last write ok, consumer group kept (consumers 10, pending 6, last-delivered id intact), stream length 100,001 before and 100,015 after (the stream sits at its cap, so this does not show loss). `ClickEventsDropped` fired and reached Alertmanager. | 302 >= 99% yes (100%); dropped rises yes; logins fail closed yes; back < 60 s yes; loss recorded |
+| Kill the worker | `worker.replicas: 0` pushed to gitops (Argo would undo `kubectl scale`), 100 req/s for 6.5 min, then reverted by `git revert` | Zero worker pods 32 s after the push. Lag grew about 105 per second (3,106 after 30 s, 39,817 after 6 min), pending 0, stream length stayed at its cap. k6 39,000 / 39,000 x 302. `ClickStreamLagHigh` pending then firing (Alertmanager active since 13:35:05, five minutes after lag passed 5000). After the revert: worker Ready 24 s after the push, **backlog drained 42 s later** (about 39,890 events, roughly 950 per second). Clicks sent 39,895, stored 39,890 (gap 5). | lag grows about rate x downtime yes; lag and pending 0 within 5 min yes (42 s); DB equals sent within the dropped count yes |
+| Redis memory pressure | `CONFIG SET maxmemory 8mb` (usage 24 MB) for 60 s under load, then back to 256mb, no restart | Writes refused (`OOM command not allowed when used memory > 'maxmemory'`). Redirects: k6 18,001 / 18,001 x 302, probe 204 / 204 x 302. Logins: 40 x 503 (fail closed). Rate-limiter errors about 6.9k; clicks lost 6,374 of 18,452 sent (a minute at about 105/s, all counted as dropped). Recovery was immediate after the restore: all 21 login probes after it were 401 again and redirect latency was back to normal. The dashboard's 5xx panel peaked at 0.3% (those login 503s) and the cache hit ratio dipped to about 33% while cache writes were refused. | writes fail yes; redirects still 302 yes; logins fail yes; recovers on restore yes |
+| AOF rewrite peak memory | 1,000,233 junk keys `drill:*` (100-byte values) added so used_memory was 214.8 MiB, then `BGREWRITEAOF` under 100 req/s of clicks (junk keys removed afterwards, AOF rewritten again to 6.8 MB) | Rewrite took about 7 s, status ok, AOF 53 MB before and 39 MB after. Container `memory.current`: 228-238 MiB before, **peak 240.5 MiB** during the run (about 12 MiB extra); `memory.peak` since container start 249 MiB; cAdvisor working set max 232.5 MiB; limit is 512 Mi. k6 48,000 / 48,000 x 302. `RedisMemoryHigh` (> 205 MiB for 5 min) **fired for real** and reached Alertmanager (active since 13:43:14). Clicks sent 48,977, stored 48,958 (gap 19). | peak below the limit yes (240 of 512 MiB); alert fires yes |
+| CPU load, HPA | 600 req/s target for 4 min, started with 2 pods | HPA desired 3 at +28 s (CPU 95% of request), desired 6 (the maximum) at +40 s (487%), 6 pods Ready at +57 s. **Scale-down: back to 2 pods 341 s after the load stopped** (300 s stabilisation window plus polling). The system SATURATED: k6 reached 498 iterations/s (27,826 dropped iterations), client p95 3.3 s, server-side p95 at or above 1 s (the histogram's top bucket is 1 s, so the real value is unknown), 0 5xx, 0 failed k6 requests, 19 of 182 probe redirects timed out at 3 s. | HPA 2 to N within 2-3 min yes (about 1 min), back down after cool-down yes |
+
+**Bottleneck (the "break it" step of P8.4, found here):** the API pods' **500m CPU limit**. At 6 replicas (the HPA maximum) 49% of the API containers' CFS periods were throttled, each pod used up to 0.53 cores, while Redis used 0.25 cores
+and Postgres 0.14: neither was the limit. So capacity on this machine is roughly 500 req/s (6 x 500m), and CPU-based HPA cannot go beyond its maximum of 6. k6 shared the host, so the figure is conservative. The click worker has the same
+500m limit and was throttled in 73% of its periods across the drills (this is also why its CPU always looked like "0.4-0.5 cores"); it still drained a 39,890-event backlog in 42 s.
+
+**Alerts, honestly:**
+- Fired for real and (where noted) reached Alertmanager: `RedisMemoryHigh`, `ClickEventsDropped`, `ClickStreamLagHigh`, and the chart default `KubeHpaMaxedOut`. Slack delivery was NOT tested (D79).
+- Went pending but cleared before their `for` elapsed: `LinkForgeRedirectP95High` (the saturating load lasted 4 min, the rule needs 5), `LinkForgeWorkerTargetMissing` (the worker was restored just before 5 min), `LinkForgeTargetDown`.
+- NOT exercised at all: `LinkForge5xxRatioHigh` (the only 5xx were login 503s, 0.3% of requests), `ClickBacklogHigh` (backlog peaked at 39.9k of 80k), `LinkForgePodCrashLooping`, `LinkForgeApiTargetMissing`.
+
+**Process notes (so the numbers are trusted):** the first attempt at drill 1 had no load (the k6 script was not on disk after a branch switch: k6 exited at once); the second overlapped with a rolling update that CI started
+(every push to the linkforge main branch redeploys, even docs-only pushes; 0.69% failed, max 28.8 s), and was discarded; the third, reported above, is clean. Do not push to linkforge main while a drill runs.
+
+**Already proven in earlier phases (not repeated):** bad image tag, failing migration, drift, Trivy blocking CI, worker idempotency tests (see the P1S/P7 sections).
+**NOT done:** worker crash-after-commit under load (covered by tests only); a drain of the node; Postgres down; any of this on EKS; existing sessions surviving a Redis loss (only fresh logins were probed).
 
