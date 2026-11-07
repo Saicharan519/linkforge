@@ -111,3 +111,44 @@ Run from a clean `git clone` of commit 264ae81 with `docker compose -p lfclean u
 | Trivy, local, same binary and flags as CI (0.76.2, `--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1`) | frontend image and API image (the compose-built `linkforge-api:dev`): 0 findings each, exit code 0 |
 
 NOT measured: image size over time, build time in CI, container memory under the real SPA on kind (until the new image is rolled out).
+
+## P8.4: k6 load test on kind (2026-11-07)
+
+Setup: kind (single node, this 12-core WSL2 machine, k6 shares it), 2 api pods at start (HPA 2 to 6, CPU 70%), 1 worker, Redis and Postgres
+in-cluster, Traefik in front. App rate limits raised for the test (redirect 1,000,000/min, create 100,000/min) and **reverted afterwards**.
+k6 v2.3.0, `constant-arrival-rate`. Scripts: `infra/k6/`. Server-side latency = the app's own histogram for route `/{code}`, read from Prometheus
+over the whole run window (this includes the HPA scale-up at the start of run A). Counts come from k6 and Postgres, not from Prometheus `increase()` (see Findings).
+
+| Run | Where k6 ran | Load | Result |
+|---|---|---|---|
+| A. warm cache | inside the cluster (Job) | one hot code, 200 req/s for 3 min, started with 2 api pods | 35,987 requests, **100% 302**, 0 x 429, 0 5xx. Client-side p50 5.2 ms, p90 8.9 ms, p95 12.7 ms, max 842 ms. **Server-side p50 3.9 ms, p95 9.6 ms, p99 92.8 ms** (p99 inflated by the scale-up and 4 new pods). k6 could not start 14 of 36,001 iterations (`dropped_iterations`). |
+| B. mixed + create | inside the cluster (Job) | 1000 codes (+5% unknown codes, expected 404), 50 req/s, plus 20 creates/min, 3 min, 6 api pods already running | 9,062 iterations, all checks passed (302 for known, 404 for unknown, 201 for creates), 0 x 429, 0 5xx. Client-side redirect_mixed p95 13.9 ms (whole-run p95 43.7 ms includes creates). **Server-side p50 4.8 ms, p95 14.8 ms, p99 23.5 ms.** |
+| C. warm cache | this machine (docker, host network, loopback to the kind port) | same as A, but started with 6 api pods | 36,001 requests, **100% 302**, 0 x 429. **Client-side p50 5.2 ms, p90 8.0 ms, p95 9.4 ms, max 92.9 ms.** Server-side p50 3.9 ms, p95 8.8 ms, p99 10.9 ms. |
+
+**Benchmark target** (ARCHITECTURE §7.1, warm redirect p95 server-side < 50 ms): **met**, 9.6 ms (A) and 8.8 ms (C). Honest limits of that statement: one hot
+code means a 100% cache hit; a single-node kind cluster on a fast machine is not EKS; the client-side numbers in C exclude any real network.
+
+**Autoscaling (run A, 200 req/s):** in the 15 s samples the HPA showed desired 4 at the second sample (CPU 106%), desired 6 (the maximum) by 62 s and 6 running pods at 77 s, all counted from the first sample (k6 itself started a little later); per-pod API CPU peaked at 0.32 cores (requests are small, so the
+HPA reads 160-270% of request). No failed request during the scale-up. Redis working set peaked at 14.7 MiB (alert line 205 MiB). The worker used about 0.4-0.5 CPU cores in both A and B (200/s and 50/s):
+it does not look proportional to the click rate (probable busy loop; NOT investigated).
+
+**Click accounting (run A + earlier 15 s smoke):** requests sent about 36,738 (+/- 1), rows stored in Postgres 36,732, `click_events_dropped_total` 6 (2 on each of the 3 api pods the HPA added):
+the gap is the dropped count. Rollup sum equals row count (36,732 = 36,732). Stream lag peaked at 17, pending at 23; both back to near 0 at the end. In run C, with 6 warm pods, 0 clicks were dropped.
+
+**Rate limiter, default limits (`limiter.js`, from this machine):** 150 redirects with a different spoofed `X-Forwarded-For` on every request: **exactly 120 got 302, 30 got 429**, so the spoofed header bought nothing
+(the limiter keys on the proxy-added address). Creates with the API key: 29 + 1 (setup) = 30 got 201, 11 got 429 (limit 30/min per user). Fixed one-minute windows: one lucky run proves the limiter,
+not its edge behaviour.
+
+**Findings (not fixed here):**
+1. New api pods lose their first clicks: 2 `cache_get`/`ratelimit` Redis errors and 2 dropped clicks on each pod the HPA added during run A, none when pods were warm (run C). The fallbacks worked (redirects
+   were all 302), but clicks were lost. Likely a cold Redis connection on the first requests (NOT proven). 6 clicks of 36,738 (0.016%).
+2. `click_stream_length` never shrinks: the worker acknowledges but never deletes entries (XLEN 81,439 with lag 0 and pending 0), so the ARCHITECTURE §7.1 alert `length > 80000` fires in steady state once ~80k
+   clicks have ever been processed, not only when there is a backlog. It is firing now. Needs a decision (below).
+3. `AlertmanagerClusterCrashlooping` (a chart default rule) fired permanently with 0 restarts; process start time appears to jitter under WSL2 (not proven). Disabled in `platform/monitoring/values.yaml`.
+4. Prometheus `increase()` over a ~3 minute window mis-states totals (overshoot from extrapolation, undercount for series that appear mid-window): e.g. 9,531 redirects reported for run B where k6 sent at most 9,000.
+   Quantiles from histograms are fine; counts are taken from k6 and Postgres.
+5. The first commit that "raised" the limits did nothing: the chart's ConfigMap template only rendered fixed keys. Fixed in gitops 772e8aa (optional `RATE_LIMIT_*` keys); the env commit was reverted.
+
+**NOT done / NOT verified:** the "break it" step (raise the rate until errors appear and name the bottleneck); a run with a real network between client and cluster; the scale-DOWN timing (P8.5 CPU drill); the
+create scenario at higher rates; any run on EKS. Screenshots of the dashboard during the runs were not taken (P8.5 does that under drills).
+
