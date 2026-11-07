@@ -1,0 +1,59 @@
+# Dependabot opens a pull request when a dependency, a base image or a GitHub Action has a new
+# version. The pull request runs the whole CI (tests, Trivy), so an update only merges if
+# everything still passes. This is how the pins in this repo (exact versions, image digests,
+# action commit SHAs) stay current instead of rotting.
+#
+# Terraform entries are added together with the Terraform code (infra/terraform, P6.2).
+version: 2
+
+updates:
+  # GitHub Actions: the workflows and our own composite actions. Actions are pinned by commit SHA
+  # with the version in a trailing comment; Dependabot updates both.
+  - package-ecosystem: github-actions
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Backend Python packages (requirements.txt pins exact versions).
+  - package-ecosystem: pip
+    directory: "/backend"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 5
+
+  # Frontend packages (package.json ranges, package-lock.json exact versions).
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor updates in one pull request per week; major versions stay separate.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # Base images in the Dockerfiles (python and node and nginx tags WITH their digests). A bumped
+  # nginx digest is also how the temporary zlib/musl upgrade in frontend/Dockerfile goes away.
+  - package-ecosystem: docker
+    directory: "/backend"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: docker
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"

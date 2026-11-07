@@ -1,0 +1,18 @@
+# Reusable step: scan the REPOSITORY FILES for known-vulnerable dependencies (what the images
+# will contain is checked by image-scan; this catches a bad dependency before an image is built).
+# Trivy reads the lock files: backend/requirements*.txt (exact pins) and frontend/package-lock.json.
+name: fs-scan
+description: Trivy gate (HIGH,CRITICAL, fixable only) for the files in the repository
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/install-trivy
+    # --scanners vuln: dependency vulnerabilities only. Leaked secrets are gitleaks' job (ci.yml)
+    # and Terraform/Docker misconfiguration is Checkov's (P6.4); two tools per question just
+    # produce two sets of noise.
+    # Same severity and --ignore-unfixed rule as the image gate, same .trivyignore for exceptions.
+    - name: Scan the repository files
+      shell: bash
+      run: |
+        ./trivy fs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+          --skip-dirs node_modules --skip-dirs .venv --no-progress .

@@ -10,22 +10,12 @@ inputs:
 runs:
   using: composite
   steps:
-    # The Trivy binary is pinned by version AND sha256, like gitleaks in ci.yml: a swapped release
-    # asset fails the checksum instead of running in our pipeline. The checksum is the one
-    # published in trivy_<version>_checksums.txt (also re-computed locally when this was written).
-    - name: Install Trivy (pinned, checksum verified)
-      shell: bash
-      env:
-        TRIVY_VERSION: "0.76.2"
-        TRIVY_SHA256: bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf
-      run: |
-        curl -sSfL --retry 3 -o trivy.tar.gz \
-          "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
-        echo "${TRIVY_SHA256}  trivy.tar.gz" | sha256sum --check --strict
-        tar -xzf trivy.tar.gz trivy
-        rm trivy.tar.gz
+    # The pinned, checksum-verified binary (version lives in ONE place: install-trivy).
+    - uses: ./.github/actions/install-trivy
     # --ignore-unfixed: only fail on problems that have a fix available (the base image can be
     # bumped); an unfixable CVE would block every build with nothing we could do.
+    # Exceptions: only through .trivyignore at the repository root (picked up automatically from
+    # the working directory), each with a reason and an expiry date. See that file.
     - name: Scan the image
       shell: bash
       env:

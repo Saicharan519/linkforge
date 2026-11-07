@@ -1,0 +1,15 @@
+# Runs gitleaks on the changes you are about to commit, on YOUR machine, before the commit exists.
+# CI scans the whole history too (ci.yml, secret scan), but by then a leaked secret is already in
+# a pushed commit and has to be treated as compromised. This catches it one step earlier.
+#
+# One-time setup (in the repository):
+#   pip install pre-commit      (or: pipx install pre-commit)
+#   pre-commit install
+# Then every `git commit` runs the hook. Run it on everything at any time: pre-commit run --all-files
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    # The same version CI runs (ci.yml, GITLEAKS_VERSION). Dependabot does not bump pre-commit
+    # revisions, so change both together.
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

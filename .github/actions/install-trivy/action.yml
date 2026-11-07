@@ -1,0 +1,22 @@
+# Installs the Trivy binary. The ONE place that knows which Trivy version CI uses, so image-scan
+# and fs-scan can never drift apart (and there is a single line to bump).
+#
+# The binary is pinned by version AND sha256, like gitleaks in ci.yml: a swapped release asset
+# fails the checksum instead of running in our pipeline. The checksum is the one published in
+# trivy_<version>_checksums.txt (also re-computed locally when this was written).
+name: install-trivy
+description: Download the pinned Trivy release, verify its checksum, leave ./trivy in the workspace
+runs:
+  using: composite
+  steps:
+    - name: Install Trivy (pinned, checksum verified)
+      shell: bash
+      env:
+        TRIVY_VERSION: "0.76.2"
+        TRIVY_SHA256: bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf
+      run: |
+        curl -sSfL --retry 5 --retry-all-errors --retry-delay 2 -o trivy.tar.gz \
+          "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+        echo "${TRIVY_SHA256}  trivy.tar.gz" | sha256sum --check --strict
+        tar -xzf trivy.tar.gz trivy
+        rm trivy.tar.gz

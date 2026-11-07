@@ -124,6 +124,18 @@ jobs:
       - name: Build
         run: npm run build
 
+  # Trivy on the repository FILES: known-vulnerable dependencies are caught here, before any image
+  # is built. Same pinned binary, severity and exception file (.trivyignore) as the image gate.
+  trivy-fs:
+    name: trivy (repository files)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/fs-scan
+
   # Builds both images WITHOUT pushing and applies the Trivy gate, so a broken Dockerfile or a
   # vulnerable base image fails the pull request, not the deploy. Skipped when this workflow is
   # called from build-push.yml (event_name is then the caller's "push"): that workflow builds,
@@ -152,13 +164,14 @@ jobs:
         with:
           image: linkforge-${{ matrix.name }}:ci
 
-  # ADVISORY for now (continue-on-error): a finding shows up in the run but does not block merges.
-  # It becomes blocking in P6 together with the Trivy gates and branch protection.
+  # BLOCKING since P6: a known vulnerability in a pinned dependency fails the run (it was advisory
+  # while the project was being built). Python: pip-audit on the exact pins. JavaScript: npm audit
+  # on the lock file, production dependencies only and HIGH or worse (the 10 moderate findings
+  # that exist are in build tooling, not in what ships).
   dependency-audit:
-    name: dependency audit (pip-audit, non-blocking)
+    name: dependency audit (pip-audit + npm audit)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -170,12 +183,18 @@ jobs:
         run: |
           pip install pip-audit==2.10.1
           pip-audit -r backend/requirements.txt -r backend/requirements-dev.txt
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Audit the JavaScript lock file (production dependencies, HIGH or worse)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
 
+  # BLOCKING since P6: a secret anywhere in the git history fails the run.
   secret-scan:
-    name: secret scan (gitleaks, non-blocking)
+    name: secret scan (gitleaks)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

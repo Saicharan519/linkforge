@@ -1,0 +1,22 @@
+# Exceptions to the Trivy gates (image-scan and fs-scan). Trivy reads this file automatically
+# from the repository root.
+#
+# The gate fails the build on a FIXABLE HIGH or CRITICAL vulnerability. The right answer is almost
+# always to fix it: bump the dependency or the base image (Dependabot opens those pull requests).
+# An exception is for the rare case where that is impossible for now (no fixed base image exists
+# yet) and the vulnerable code cannot be reached. Rules, all mandatory:
+#
+#   1. One line per CVE, with a comment ABOVE it that says: why it does not apply or cannot be
+#      fixed yet, who decided, and the date.
+#   2. Every line ends with  exp:YYYY-MM-DD  (at most 90 days ahead). Trivy stops honouring an
+#      entry on that date, the finding comes back and the build fails again: an exception can
+#      never be forgotten.
+#   3. Never ignore a whole package or a whole image; only specific CVE ids.
+#   4. Remove the line as soon as the fix is available.
+#
+# Example (NOT active, this is a comment):
+#   # CVE-2099-0001: only reachable through the XML parser, which we do not use. Decided
+#   # 2026-11-07 by <name>; no fixed base image published yet.
+#   CVE-2099-0001 exp:2027-01-15
+#
+# Currently no exceptions: every finding so far was fixed instead (see D54, D74).
