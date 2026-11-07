@@ -1,0 +1,12 @@
+# Backend settings for every stack AFTER bootstrap (foundation/, cloud/). Copy this file into the
+# stack's directory as backend.hcl (git-ignored) and use it with:
+#   terraform init -backend-config=backend.hcl
+#
+# Why a separate file instead of values in the code: a `backend` block cannot use variables, and the
+# bucket name contains your account id, which we keep out of a public repository.
+bucket       = "linkforge-tfstate-<ACCOUNT_ID>"
+region       = "ap-southeast-2"
+encrypt      = true # server-side encryption of the state object
+use_lockfile = true # lock via a .tflock object in the same bucket: no DynamoDB table needed (Terraform >= 1.11)
+# key: set it in the stack's own backend block, one per stack:
+#   foundation -> foundation/terraform.tfstate     cloud -> cloud/terraform.tfstate

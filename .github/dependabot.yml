@@ -3,7 +3,7 @@
 # everything still passes. This is how the pins in this repo (exact versions, image digests,
 # action commit SHAs) stay current instead of rotting.
 #
-# Terraform entries are added together with the Terraform code (infra/terraform, P6.2).
+# Terraform: one entry per stack directory (add foundation/ and cloud/ when they exist).
 version: 2
 
 updates:
@@ -53,6 +53,14 @@ updates:
       prefix: "chore(deps)"
   - package-ecosystem: docker
     directory: "/frontend"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Terraform providers and modules (versions are `~>` ranges, the lock file holds the exact build).
+  - package-ecosystem: terraform
+    directory: "/infra/terraform/bootstrap"
     schedule:
       interval: weekly
     commit-message:

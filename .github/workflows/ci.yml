@@ -124,6 +124,55 @@ jobs:
       - name: Build
         run: npm run build
 
+  # Terraform, offline: format, validate and Checkov. No AWS credentials exist in this job and none
+  # are needed: `init -backend=false` only downloads the provider, `validate` only reads the code,
+  # and nothing is planned or applied (that is done by a human, never by CI).
+  # The Terraform binary is pinned by version AND sha256 (published in
+  # terraform_<version>_SHA256SUMS), like gitleaks and Trivy; Checkov is pinned by version.
+  terraform:
+    name: terraform (fmt + validate + checkov)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Terraform (pinned, checksum verified)
+        env:
+          TERRAFORM_VERSION: "1.17.1"
+          TERRAFORM_SHA256: 4638628058e71a55212b1c563712eac03b902128f40740f3dc8174df12135061
+        run: |
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 2 -o terraform.zip \
+            "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          echo "${TERRAFORM_SHA256}  terraform.zip" | sha256sum --check --strict
+          unzip -q terraform.zip terraform
+          sudo mv terraform /usr/local/bin/terraform
+          rm terraform.zip
+          terraform version
+
+      - name: Format, init (no backend) and validate every stack
+        run: |
+          terraform fmt -check -diff -recursive infra/terraform
+          for dir in infra/terraform/*/; do
+            if ls "$dir"*.tf > /dev/null 2>&1; then
+              echo "== $dir"
+              terraform -chdir="$dir" init -backend=false -input=false
+              terraform -chdir="$dir" validate
+            fi
+          done
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      # Checkov reads the Terraform and reports insecure settings. Every skip lives next to the code
+      # it applies to, with its reason (#checkov:skip=ID:reason), so a reviewer sees it.
+      - name: Checkov (blocking)
+        run: |
+          pip install checkov==3.4.3
+          checkov -d infra/terraform --framework terraform --quiet --compact
+
   # Trivy on the repository FILES: known-vulnerable dependencies are caught here, before any image
   # is built. Same pinned binary, severity and exception file (.trivyignore) as the image gate.
   trivy-fs:

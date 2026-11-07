@@ -1,0 +1,3 @@
+# Copy to terraform.tfvars (git-ignored) and fill in your own account id:
+#   cp terraform.tfvars.example terraform.tfvars
+allowed_account_id = "123456789012"
