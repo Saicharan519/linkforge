@@ -1,0 +1,44 @@
+# The load test as a Job INSIDE the kind cluster (server-side numbers, no laptop network). Not managed by Argo CD:
+# it is a throw-away experiment in its own namespace `k6`. See infra/k6/README.md for the exact commands.
+#
+# k6 talks to Traefik's Service (the real path: Ingress, then API) and sets the Host header, because the Ingress
+# routes by host name and the API's host guard only serves redirects on the short-link host.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: k6
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-load
+  namespace: k6
+spec:
+  backoffLimit: 0 # a failed load test is a result, not something to retry
+  ttlSecondsAfterFinished: 7200
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext: {runAsNonRoot: true, runAsUser: 12345, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: k6
+          # grafana/k6 v2.3.0, pinned by digest (a tag can be re-pointed)
+          image: grafana/k6@sha256:3e4186aea62e11a45560bfc51e19eeafe82fc07ce069c78aff44b7ff893d9a5e
+          args: ["run", "/scripts/load.js"]
+          env:
+            - {name: GO_URL, value: "http://traefik.traefik.svc.cluster.local"}
+            - {name: APP_URL, value: "http://traefik.traefik.svc.cluster.local"}
+            - {name: GO_HOST, value: "go.localtest.me"}
+            - {name: APP_HOST, value: "app.localtest.me"}
+            - {name: DURATION, value: "3m"}
+            - name: API_KEY
+              valueFrom: {secretKeyRef: {name: k6-api-key, key: api_key}}
+          resources:
+            requests: {cpu: 500m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+      volumes:
+        - name: scripts
+          configMap: {name: k6-scripts}
