@@ -143,7 +143,7 @@ not its edge behaviour.
 1. New api pods lose their first clicks: 2 `cache_get`/`ratelimit` Redis errors and 2 dropped clicks on each pod the HPA added during run A, none when pods were warm (run C). The fallbacks worked (redirects
    were all 302), but clicks were lost. Likely a cold Redis connection on the first requests (NOT proven). 6 clicks of 36,738 (0.016%).
 2. `click_stream_length` never shrinks: the worker acknowledges but never deletes entries (XLEN 81,439 with lag 0 and pending 0), so the ARCHITECTURE §7.1 alert `length > 80000` fires in steady state once ~80k
-   clicks have ever been processed, not only when there is a backlog. It is firing now. Needs a decision (below).
+   clicks have ever been processed, not only when there is a backlog. It was firing. RESOLVED in D82: the alert is now on the backlog (lag + pending) and renamed ClickBacklogHigh.
 3. `AlertmanagerClusterCrashlooping` (a chart default rule) fired permanently with 0 restarts; process start time appears to jitter under WSL2 (not proven). Disabled in `platform/monitoring/values.yaml`.
 4. Prometheus `increase()` over a ~3 minute window mis-states totals (overshoot from extrapolation, undercount for series that appear mid-window): e.g. 9,531 redirects reported for run B where k6 sent at most 9,000.
    Quantiles from histograms are fine; counts are taken from k6 and Postgres.

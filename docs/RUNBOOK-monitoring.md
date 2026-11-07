@@ -54,7 +54,7 @@ To change a panel, edit the JSON in git (an edit in the Grafana UI is lost when 
 | LinkForge5xxRatioHigh | 5xx > 2% of requests AND request rate > 0.1/s | 5 m | critical |
 | ClickStreamLagHigh | `max(click_stream_lag)` > 5000 | 5 m | warning |
 | ClickStreamPendingHigh | `max(click_stream_pending)` > 500 | 10 m | warning |
-| ClickStreamLengthHigh | `max(click_stream_length)` > 80000 (cap is 100000) | none | critical |
+| ClickBacklogHigh | `max(click_stream_lag)` + `max(click_stream_pending)` > 80000 (stream cap is 100000; length alone is not alerted, D82) | none | critical |
 | ClickEventsDropped | dropped-click rate > 0 | 5 m | warning |
 | RedisMemoryHigh | container working set > 205 MiB (80% of maxmemory 256 MB) | 5 m | warning |
 | LinkForgePodCrashLooping | a container is in CrashLoopBackOff | 5 m | critical |
