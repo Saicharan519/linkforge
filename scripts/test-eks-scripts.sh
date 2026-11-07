@@ -31,7 +31,16 @@ cat > "$T/shim/kubectl" << 'EOF'
 # fake kubectl: first two arguments are "--kubeconfig FILE"
 shift 2
 all="$*"
+echo "$all" >> "${KLOG:-/dev/null}"
 case "$all" in
+  "-n argocd get application linkforge") exit 0 ;;
+  "-n linkforge wait --for=delete ingress --all"*) exit 0 ;;
+  "-n linkforge get ingress -o name") printf '%s' "${FAKE_INGRESS_LEFT:-}" ;;
+  "get namespace linkforge") exit 0 ;;
+  "get ingress -A -o name") printf '%s' "${FAKE_INGRESS_LEFT:-}" ;;
+  "get svc -A -o jsonpath="*) printf '%s' "${FAKE_LB_LEFT:-}" ;;
+  "get pvc -A -o name") printf '%s' "${FAKE_PVC_LEFT:-}" ;;
+  "get pv -o name") printf '%s' "${FAKE_PV_LEFT:-}" ;;
   "config current-context") echo "${FAKE_CONTEXT:-arn:aws:eks:ap-southeast-2:123456789012:cluster/linkforge}" ;;
   "config view --minify -o jsonpath={.clusters[0].cluster.server}") printf '%s' "${FAKE_SERVER:-https://ABCDEF.gr7.ap-southeast-2.eks.amazonaws.com}" ;;
   "get nodes -o jsonpath={.items[0].spec.providerID}") printf '%s' "${FAKE_PROVIDER:-aws:///ap-southeast-2a/i-0abc}" ;;
@@ -43,6 +52,7 @@ EOF
 cat > "$T/shim/terraform" << 'EOF'
 #!/usr/bin/env bash
 # fake terraform: `terraform -chdir=DIR output -raw NAME`
+echo "$*" >> "${TFLOG:-/dev/null}"
 name="${@: -1}"
 case "$name" in
   db_endpoint) printf 'linkforge.abc123.ap-southeast-2.rds.amazonaws.com' ;;
@@ -125,8 +135,26 @@ grep -q "^  SHORT_URL_BASE: http://$GO\$" "$v" && grep -q "^  PUBLIC_REDIRECT_HO
 grep -v "^[[:space:]]*#" "$v" | grep -q "pending.invalid" && bad "pending.invalid is still in a value of values.yaml" || ok "no pending.invalid left in any value"
 helm template linkforge "$T/gitops/charts/linkforge" -n linkforge -f "$v" -f "$T/gitops/envs/eks/sealed.values.yaml" > /dev/null 2>&1 && ok "the chart still renders with the real hosts" || bad "chart render failed after set-hosts"
 
+echo "== eks-teardown.sh"
+export KLOG="$T/kubectl.log" TFLOG="$T/terraform.log"
+: > "$KLOG"; : > "$TFLOG"
+expect_fail "refuses without the typed confirmation" "not confirmed" bash -c "echo wrong | '$HERE/eks-teardown.sh'"
+grep -q "delete application\|delete namespace" "$KLOG" && bad "something was deleted without confirmation" || ok "nothing is deleted without confirmation"
+FAKE_SERVER="https://127.0.0.1:6443" expect_fail "refuses a non-EKS target" "not an EKS endpoint" "$HERE/eks-teardown.sh" --yes
+: > "$KLOG"
+if "$HERE/eks-teardown.sh" --yes > "$T/teardown.log" 2>&1; then ok "runs to the end on a clean cluster"; else bad "teardown failed: $(tail -3 "$T/teardown.log")"; fi
+app_line="$(grep -n "delete application linkforge" "$KLOG" | head -1 | cut -d: -f1)"
+ns_line="$(grep -n "delete namespace linkforge" "$KLOG" | head -1 | cut -d: -f1)"
+{ [ -n "$app_line" ] && [ -n "$ns_line" ] && [ "$app_line" -lt "$ns_line" ]; } && ok "deletes the Application BEFORE the namespace (ALBs before the volume)" || bad "wrong order or a delete is missing (app=$app_line ns=$ns_line)"
+[ ! -s "$TFLOG" ] && ok "never calls terraform" || bad "teardown called terraform"
+grep -q "terraform destroy" "$T/teardown.log" && ok "prints the terraform destroy command for the human" || bad "no next-step hint"
+FAKE_INGRESS_LEFT="ingress.networking.k8s.io/app" expect_fail "refuses when an Ingress is left (ALB maybe not deleted)" "do NOT run terraform destroy" "$HERE/eks-teardown.sh" --yes
+FAKE_PVC_LEFT="persistentvolumeclaim/data-redis-0" expect_fail "refuses when a volume claim is left" "PersistentVolumeClaim" "$HERE/eks-teardown.sh" --yes
+FAKE_PV_LEFT="persistentvolume/pvc-123" expect_fail "refuses when a volume is left" "PersistentVolume" "$HERE/eks-teardown.sh" --yes
+FAKE_LB_LEFT="default/some-lb" expect_fail "refuses when a LoadBalancer Service is left" "LoadBalancer" "$HERE/eks-teardown.sh" --yes
+
 echo "== syntax"
-for f in eks-common.sh bootstrap-eks.sh eks-seal-and-enable.sh eks-set-hosts.sh eks-verify.sh test-eks-scripts.sh; do
+for f in eks-common.sh bootstrap-eks.sh eks-seal-and-enable.sh eks-set-hosts.sh eks-verify.sh eks-teardown.sh test-eks-scripts.sh; do
   bash -n "$HERE/$f" && ok "bash -n $f" || bad "syntax error in $f"
 done
 if command -v shellcheck > /dev/null; then
