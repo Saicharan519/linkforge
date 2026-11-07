@@ -1,3 +1,7 @@
+> **Update (P7D, D78):** the manual steps in this runbook (installing Argo CD, applying `linkforge-app.yaml`) are now
+> done by `scripts/bootstrap-kind.sh`, and the Application lives in `argocd/apps/linkforge.yaml` under `argocd/root.yaml`.
+> See docs/RUNBOOK-bootstrap-kind.md. This file stays as the explanation of what each step does.
+
 # Runbook: Argo CD takes over (P1S.5)
 
 Goal: stop deploying by hand. After this phase **a git push is a deploy and `git revert` is a
