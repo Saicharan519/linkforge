@@ -53,6 +53,7 @@
       "Bash(*eks-verify.sh*)",
       "Bash(*eks-teardown.sh*)",
       "Bash(*eks-fix-webhook-ca.sh*)",
+      "Bash(*eks-reset-gitops.sh*)",
       "Bash(terraform output*)",
       "Bash(terraform show*)",
       "Bash(terraform state *)",
