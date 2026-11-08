@@ -163,6 +163,44 @@ an explicit deny: take a screenshot and paste it in the chat. (`sts get-caller-i
 **Important:** the account's own AWS-managed policy may still deny things. An explicit deny always wins. Only the first Terraform run
 shows this. That is why we apply in stages.
 
+### 2e. What the policy covers, and what the first real run taught us
+The first real run found two permissions that the first version of `iam-policy-p9.json` did not have. Both are now in the file (check that the text you
+pasted in 2b contains the statements `LookUpServiceLinkedRoles` and `ReadTheRecommendedEksNodeImage`):
+
+| Missing permission | Where it showed up | Why |
+|---|---|---|
+| `ssm:GetParameter` on `arn:aws:ssm:ap-southeast-2::parameter/aws/service/eks/optimized-ami/*` | `terraform plan` (Step 5b): `AccessDeniedException ... ssm:GetParameter` | the node group looks up the ID of the recommended EKS server image |
+| `iam:GetRole` on `role/AWSServiceRoleFor*` and `role/aws-service-role/*` | Step 5d, creating the node group: `Failed to validate if SLR: AWSServiceRoleForAmazonEKSNodegroup already exists due to missing permissions for 'iam:GetRole'` | EKS asks IAM for the AWS-owned role **by name only** (no folder in the path), so BOTH spellings must be allowed |
+
+**If you created `linkforge-p9` BEFORE this update** (the policy text in your account lacks those two statements), do not retype the big policy. Create one more
+**managed** policy exactly as in 2c, named `linkforge-extra`, with this text (replace `123456789012` with your account id), and attach it to the user:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": "arn:aws:ssm:ap-southeast-2::parameter/aws/service/eks/optimized-ami/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iam:GetRole",
+      "Resource": [
+        "arn:aws:iam::123456789012:role/AWSServiceRoleFor*",
+        "arn:aws:iam::123456789012:role/aws-service-role/*"
+      ]
+    }
+  ]
+}
+```
+
+**KMS and log permissions are NOT needed, and none are in the policy.** They did not come up on the first run, and the reason is that this stack asks for neither:
+`eks.tf` sets `create_kms_key = false`, `encryption_config = null`, `enabled_log_types = []` and `create_cloudwatch_log_group = false` (no customer key, no control-plane
+log group; EKS still encrypts etcd with an AWS-owned key). If you ever switch those on, add `kms:*` on the key and `logs:*` on the log group to the policy first, or the
+apply will stop with an AccessDenied.
+
 ---
 
 ## Step 3. Read-only checks (free, they create nothing)
@@ -243,14 +281,18 @@ cat ~/runlogs/preflight-offerings.log ~/runlogs/preflight-types.log ~/runlogs/pr
 
 **Why:** Terraform needs your account id and your IP address. These files are git-ignored (they never get committed).
 
-### 4a. Find your public IP
+### 4a. Find your public IP (all of them)
+
+Some internet connections leave through MORE THAN ONE public address and switch between them from one request to the next. On the first real run the
+address alternated between two, and `kubectl` kept failing at random with `net/http: TLS handshake timeout` (it looked like a flaky network). The likely cause is a request that
+left through the address that was not in `admin_cidrs`; the failures stopped once both were listed. Check 12 times:
 
 ```bash
-curl -s https://checkip.amazonaws.com
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do curl -s https://checkip.amazonaws.com; sleep 3; done
 ```
 
-Expected: one line such as `203.0.113.7`. That is the address of your internet connection. Write it down. If your internet provider
-changes it during the day (restarting the router can do it), you lose access to the cluster API and the load balancers. See "My IP changed" at the end.
+Expected: the same address 12 times (one address), or two or more different addresses (write down ALL of them). Step 4b, Step 8 and the cluster all need the full list.
+If your provider changes the address during the day (restarting the router can do it), you lose access to the cluster API and the load balancers. See "My IP changed" at the end.
 
 ### 4b. Create `terraform.tfvars`
 
@@ -268,7 +310,8 @@ nano terraform.tfvars
 
 In nano, use the arrow keys. Change exactly these two lines:
 - `allowed_account_id = "123456789012"`: put YOUR 12 digits between the quotes;
-- `admin_cidrs = ["203.0.113.7/32"]`: put YOUR IP and keep `/32` at the end.
+- `admin_cidrs = ["203.0.113.7/32"]`: put YOUR IP and keep `/32` at the end. With more than one address, list them all:
+  `admin_cidrs = ["203.0.113.7/32", "198.51.100.9/32"]`.
 
 After Claude has given you the server route, remove the `#` at the start of the matching lines. Example for the default route, the
 lines must look like this (no `#`):
@@ -329,8 +372,9 @@ check the bucket name in `backend.hcl`, then paste the log.
 terraform plan -out=tfplan 2>&1 | tee ~/runlogs/cloud-plan.log
 ```
 
-Expected: a long list, ending with a line like `Plan: NN to add, 0 to change, 0 to destroy.` with NN around 70 to 100 (a guess).
-Nothing to change or destroy on a first run. **Paste the last 40 lines to Claude before continuing:**
+Expected: a long list, ending with a line like `Plan: 64 to add, 0 to change, 0 to destroy.` (it was 63 before the port-8080 rule of Step 9 was added; the exact number may move
+a little with module versions). Nothing to change or destroy on a first run. If it ends with `Error: ... AccessDeniedException ... ssm:GetParameter`, your policy is the
+old one: see 2e. **Paste the last 40 lines to Claude before continuing:**
 
 ```bash
 tail -40 ~/runlogs/cloud-plan.log
@@ -350,15 +394,42 @@ Expected: about 3 to 6 minutes (the NAT gateway is the slow part), ending with `
 **From here the NAT gateway costs money per hour.** If this fails with `AccessDenied`: run `terraform destroy` (it deletes what exists,
 type `yes`) and paste `~/runlogs/cloud-apply-vpc.log`.
 
+**If it fails with `waiting for EC2 NAT Gateway ... timeout while waiting for state to become 'available' (last state: 'pending', timeout: 10m0s)`:** this is NOT a
+permission problem and it does not mean the gateway failed. A NAT gateway normally takes 1 to 2 minutes; on the first real run it was still `pending` after 10 minutes
+(Terraform's own waiting limit) and was ready later. The cause was not established (AWS slowness, or the connection between this computer and AWS, which dropped several times that day). What to do:
+1. Console, **VPC**, left menu **NAT gateways**: read the **State** of the gateway. `Pending` after 5 more minutes or `Failed` (with a failure message): paste it and stop.
+2. If it is `Available`: run `terraform plan -target=module.vpc` and read it. If it says `# module.vpc.aws_nat_gateway.this[0] must be replaced`, Terraform marked the gateway as
+   failed; tell it the gateway is fine, then plan again (it should now only add the missing route and associations):
+   ```bash
+   terraform untaint 'module.vpc.aws_nat_gateway.this[0]'
+   ```
+3. Run the same `terraform apply -target=module.vpc` again. On the first real run the re-run finished with `1 added, 0 destroyed`.
+
 ### 5d. Stage 2: EKS (this is where the big costs start)
 
 ```bash
-terraform apply -target=module.eks 2>&1 | tee ~/runlogs/cloud-apply-eks.log
+terraform apply -target=module.eks -target=aws_iam_role_policy_attachment.ebs_csi 2>&1 | tee ~/runlogs/cloud-apply-eks.log
 ```
 
+**Why two `-target`s:** the cluster includes the disk driver add-on (`aws-ebs-csi-driver`, the disk for Redis). Its pods get their AWS permissions from a role, and the
+attachment of AWS's disk policy to that role (`aws_iam_role_policy_attachment.ebs_csi`) is a **separate resource outside `module.eks`**. With only `-target=module.eks` the role exists
+but is EMPTY: on the first real run the two `ebs-csi-controller` pods crash-looped (`1/6` containers ready, `CrashLoopBackOff`) with
+`api error UnauthorizedOperation: ... is not authorized to perform: ec2:DescribeAvailabilityZones because no identity-based policy allows the action`, and the add-on creation sat on
+`Still creating...` for more than 12 minutes (Terraform gives up after about 20).
+
 Type `yes`. Expected: **15 to 25 minutes** of waiting. Lines like `Still creating... [10m0s elapsed]` are normal. It ends with `Apply complete!`.
-Do not press Ctrl+C. If it fails, do not retry blindly: paste the log. The most likely failures are an `AccessDenied` (permission),
+Do not press Ctrl+C. If it fails, do not retry blindly: paste the log. The most likely failures are an `AccessDenied` (permission; for `iam:GetRole` on `AWSServiceRoleForAmazonEKSNodegroup`
+see 2e),
 `not eligible for Free Tier` (server type), or `InvalidParameterException` about the Kubernetes version.
+
+If it sits on `aws-ebs-csi-driver: Still creating...` for more than about 8 minutes, look at the pods from a second terminal (do Step 6 there first):
+
+```bash
+kubectl -n kube-system get pods | grep ebs-csi
+```
+
+`6/6 Running` is healthy. `CrashLoopBackOff` means the role has no policy: check that the attachment line (`aws_iam_role_policy_attachment.ebs_csi: Creation complete`) is in
+`~/runlogs/cloud-apply-eks.log`, and paste `kubectl -n kube-system logs deploy/ebs-csi-controller -c ebs-plugin --tail=20`.
 
 ### 5e. Stage 3: everything else (database, roles)
 
@@ -369,7 +440,14 @@ terraform apply 2>&1 | tee ~/runlogs/cloud-apply-rest.log
 Type `yes`. Expected: 5 to 15 minutes, mostly the database. It ends with `Apply complete! Resources: ... added` and a list of outputs. If it asks
 for a variable value (like `Enter a value:` for something unknown), stop with Ctrl+C and tell Claude.
 
-**Success test for Step 5:** run this. Expected: `No changes. Your infrastructure matches the configuration.`
+If stage 2 failed on the add-on and this stage ends with `creating EKS Add-On (linkforge:aws-ebs-csi-driver) ... ResourceInUseException: Association already exists`: Terraform
+had removed the broken add-on and tried to create it again before AWS had finished deleting the add-on's Pod Identity link. Run the same command once more. On the first real run
+that was enough (1 resource added, and the disk driver pods became `6/6 Running` within a minute). If the same error comes back, paste
+`aws eks list-pod-identity-associations --region ap-southeast-2 --cluster-name linkforge --output text`.
+
+**Success test for Step 5:** run this. Expected: `No changes. Your infrastructure matches the configuration.` On the first real run it said
+`Plan: 0 to add, 1 to change, 0 to destroy.` for `module.rds.aws_db_parameter_group.this`: AWS reports the `apply_method` of `rds.force_ssl` as `pending-reboot` and the code
+says `immediate`, so Terraform shows that change forever. The value (`1`, SSL required) is the same: it is harmless, ignore it and do not apply it. Any OTHER change: paste it.
 
 ```bash
 terraform plan 2>&1 | tail -5
@@ -392,14 +470,23 @@ writes only the separate file.)
 export KUBECONFIG=~/.kube/linkforge-eks.yaml
 ```
 
-Do this ONLY in the terminal where you work on EKS. Close this terminal at the end. Test:
+Do this ONLY in the terminal where you work on EKS. Close this terminal at the end. **Every new terminal window starts without it**: with `KUBECONFIG` empty,
+`kubectl` silently talks to your local kind cluster (on the first real run `kubectl get nodes` answered with `linkforge-control-plane`, a 24-hour-old kind node). Check before
+you trust any `kubectl` answer:
+
+```bash
+kubectl config current-context
+```
+
+Expected: a name that starts with `arn:aws:eks:ap-southeast-2:` and ends with `:cluster/linkforge`. Then:
 
 ```bash
 kubectl get nodes
 ```
 
-Expected: 2 (or 3) lines with `STATUS Ready`. If it hangs or says `Unable to connect`, your IP is probably not in `admin_cidrs`: compare with
-`curl -s https://checkip.amazonaws.com`. If `Ready` does not appear for 5 minutes, paste the output of `kubectl get nodes` and `kubectl get pods -A`.
+Expected: 2 (or 3) lines named `ip-10-20-...compute.internal` with `STATUS Ready`. If it hangs or says `Unable to connect` or `TLS handshake timeout`, an address you leave through
+is probably not in `admin_cidrs` (see 4a: connections can alternate between addresses; a retry that works once and fails the next time is the sign). If `Ready` does not appear for
+5 minutes, paste the output of `kubectl get nodes` and `kubectl get pods -A`.
 
 ---
 
@@ -415,9 +502,16 @@ cd ~/linkforge
 scripts/bootstrap-eks.sh 2>&1 | tee ~/runlogs/bootstrap-eks.log
 ```
 
-Expected: five numbered steps. Step 5 prints a line every 15 seconds like
-`sealed-secrets=Synced/Healthy eks-storage=... metrics-server=... aws-load-balancer-controller=...`. It takes about 5 to 15 minutes. It ends with
-`Done. Platform is up`.
+Expected: six numbered steps. Step 5 prints a line every 15 seconds like
+`sealed-secrets=Synced/Healthy eks-storage=... metrics-server=... aws-load-balancer-controller=...`. It takes about 5 to 15 minutes (3 minutes on the first real run).
+Step 6 checks the certificate authority of the load balancer controller's admission webhooks and prints either `all 8 webhooks already trust the controller's CA: nothing to do`
+or `patched: ...` lines and `fixed N of 8 webhooks`. Both are fine. It ends with `Done. Platform is up`.
+
+**Why step 6 exists:** on the first real run the app's two Ingresses were never created, because Kubernetes asks the controller's webhook to approve each Ingress and the answer was
+`x509: certificate signed by unknown authority`. The chart makes a new random certificate authority on every render; Argo CD keeps the values from the first sync and, when that first sync
+happens in more than one attempt, the certificate the controller serves (a Secret) and the authority the webhooks trust (`caBundle`) come from different renders (two different hashes were measured; the
+retry is a hypothesis). The step copies the Secret's CA into the webhooks. It does nothing when they already match, and `scripts/eks-seal-and-enable.sh` runs it again before enabling the app.
+You can also run it by hand any time: `scripts/eks-fix-webhook-ca.sh`.
 
 If it ends with `NOT all platform apps are Healthy`: paste `~/runlogs/bootstrap-eks.log`, and also:
 
@@ -443,17 +537,23 @@ git status --short
 
 Expected: no output (clean). If something is listed, stop and tell Claude.
 
-Put your IP in (this takes your current IP automatically):
+Put your address in. With ONE address (Step 4a showed the same address 12 times) this takes it automatically:
 
 ```bash
 sed -i "s|REPLACE_WITH_YOUR_IP/32|$(curl -s https://checkip.amazonaws.com)/32|" envs/eks/values.yaml
+```
+
+With TWO OR MORE addresses (Step 4a), write them all, separated by commas and no spaces (example with two; use YOUR addresses):
+
+```bash
+sed -i "s|REPLACE_WITH_YOUR_IP/32|203.0.113.7/32,198.51.100.9/32|" envs/eks/values.yaml
 ```
 
 ```bash
 git diff
 ```
 
-Expected: exactly one changed line, `inbound-cidrs: <your ip>/32`. If anything else changed, stop.
+Expected: exactly one changed line, `inbound-cidrs: <your ip>/32` (or the comma-separated list). If anything else changed, stop.
 
 ```bash
 git commit -am "chore(eks): allow my IP on the load balancers"
@@ -480,6 +580,15 @@ scripts/eks-seal-and-enable.sh 2>&1 | tee ~/runlogs/eks-seal-and-enable.log
 Expected: four numbered steps; it prints the database user and host, the PASSWORD LENGTH only (never the password), and the length of the
 ciphertexts, then `pushed.`. If it says `REPLACE_ placeholder`, Step 8 was skipped. If it says `terraform output returned nothing`, check
 `echo $AWS_PROFILE` in this terminal (it must print `linkforge`).
+
+**If step 3/4 stops with `error: cannot fetch certificate: error trying to reach service: dial tcp 10.20.x.x:8080: connect: connection timed out`** (first real run): `kubeseal`
+does not talk to the Sealed Secrets controller directly; it asks the Kubernetes API to forward the request (the API "service proxy") to the controller pod on port 8080, and the nodes'
+security group did not admit the control plane on that port. The rule is in `infra/terraform/cloud/eks.tf` now (`ingress_cluster_8080_sealed_secrets`: control plane to the nodes, TCP 8080 only).
+If your cluster was built from an older checkout: `git pull` in `~/linkforge` (on `main`), then in `infra/terraform/cloud` run `terraform apply` (expected: `Plan: 1 to add`, plus the harmless
+RDS parameter group change of 5e), and then run this step again. It is safe to run twice: it stopped before writing anything.
+
+This step also runs the webhook certificate check of Step 7 first; if the Ingresses of the app are later rejected with `x509: certificate signed by unknown authority`, run
+`scripts/eks-fix-webhook-ca.sh`.
 
 Watch the app come up (stop watching with `Ctrl+C`):
 

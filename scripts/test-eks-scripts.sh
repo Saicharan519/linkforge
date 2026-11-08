@@ -46,6 +46,11 @@ case "$all" in
   "get nodes -o jsonpath={.items[0].spec.providerID}") printf '%s' "${FAKE_PROVIDER:-aws:///ap-southeast-2a/i-0abc}" ;;
   "-n linkforge get ingress app -o jsonpath={.status.loadBalancer.ingress[0].hostname}") printf '%s' "${FAKE_APP_DNS:-}" ;;
   "-n linkforge get ingress go -o jsonpath={.status.loadBalancer.ingress[0].hostname}") printf '%s' "${FAKE_GO_DNS:-}" ;;
+  "-n kube-system get secret aws-load-balancer-tls -o jsonpath="*) printf '%s' "${FAKE_SECRET_CA-Q0EtT0Y=}" ;;
+  "get validatingwebhookconfiguration aws-load-balancer-webhook -o jsonpath={.webhooks[*].name}") printf '%s' "${FAKE_VWC_NAMES-vingress.elbv2.k8s.aws vtgb.elbv2.k8s.aws vsvc.elbv2.k8s.aws}" ;;
+  "get mutatingwebhookconfiguration aws-load-balancer-webhook -o jsonpath={.webhooks[*].name}") printf '%s' "${FAKE_MWC_NAMES-mpod.elbv2.k8s.aws mtgb.elbv2.k8s.aws}" ;;
+  "get validatingwebhookconfiguration aws-load-balancer-webhook -o jsonpath={.webhooks["*"].clientConfig.caBundle}") printf '%s' "${FAKE_LIVE_CA-Q0EtT0Y=}" ;;
+  "get mutatingwebhookconfiguration aws-load-balancer-webhook -o jsonpath={.webhooks["*"].clientConfig.caBundle}") printf '%s' "${FAKE_LIVE_CA-Q0EtT0Y=}" ;;
   *) echo "(fake kubectl) $all" ;;
 esac
 EOF
@@ -153,8 +158,24 @@ FAKE_PVC_LEFT="persistentvolumeclaim/data-redis-0" expect_fail "refuses when a v
 FAKE_PV_LEFT="persistentvolume/pvc-123" expect_fail "refuses when a volume is left" "PersistentVolume" "$HERE/eks-teardown.sh" --yes
 FAKE_LB_LEFT="default/some-lb" expect_fail "refuses when a LoadBalancer Service is left" "LoadBalancer" "$HERE/eks-teardown.sh" --yes
 
+echo "== eks-fix-webhook-ca.sh"
+export KLOG="$T/kubectl-ca.log"
+: > "$KLOG"
+"$HERE/eks-fix-webhook-ca.sh" > "$T/ca-match.log" 2>&1 && ok "runs on a cluster whose webhooks already trust the CA" || bad "fix-webhook-ca failed: $(tail -3 "$T/ca-match.log")"
+grep -q "^patch " "$KLOG" && bad "it patched webhooks that already matched (not idempotent)" || ok "changes nothing when every caBundle already matches the Secret"
+grep -q "nothing to do" "$T/ca-match.log" && ok "says so" || bad "no 'nothing to do' message"
+: > "$KLOG"
+FAKE_LIVE_CA="b3RoZXI=" "$HERE/eks-fix-webhook-ca.sh" > "$T/ca-mismatch.log" 2>&1 && ok "runs on a cluster whose webhooks trust another CA" || bad "fix-webhook-ca failed on a mismatch: $(tail -3 "$T/ca-mismatch.log")"
+[ "$(grep -c "^patch validatingwebhookconfiguration" "$KLOG")" = 3 ] && [ "$(grep -c "^patch mutatingwebhookconfiguration" "$KLOG")" = 2 ] && ok "patches every webhook of both configurations (3 + 2)" || bad "wrong number of patches: $(grep -c '^patch ' "$KLOG")"
+grep -q '"value":"Q0EtT0Y="' "$KLOG" && ok "the patch carries the CA of the Secret" || bad "the patch does not carry the Secret's CA"
+: > "$KLOG"
+FAKE_SECRET_CA="" expect_fail "refuses when the Secret has no ca.crt" "was not found in kube-system" "$HERE/eks-fix-webhook-ca.sh"
+FAKE_VWC_NAMES="" expect_fail "refuses when the webhook configuration is empty" "has no webhooks" "$HERE/eks-fix-webhook-ca.sh"
+grep -q "^patch " "$KLOG" && bad "it patched although a precondition failed" || ok "patches nothing when a precondition fails"
+FAKE_SERVER="https://127.0.0.1:6443" expect_fail "refuses a non-EKS target" "not an EKS endpoint" "$HERE/eks-fix-webhook-ca.sh"
+
 echo "== syntax"
-for f in eks-common.sh bootstrap-eks.sh eks-seal-and-enable.sh eks-set-hosts.sh eks-verify.sh eks-teardown.sh test-eks-scripts.sh; do
+for f in eks-common.sh bootstrap-eks.sh eks-seal-and-enable.sh eks-set-hosts.sh eks-verify.sh eks-teardown.sh eks-fix-webhook-ca.sh test-eks-scripts.sh; do
   bash -n "$HERE/$f" && ok "bash -n $f" || bad "syntax error in $f"
 done
 if command -v shellcheck > /dev/null; then

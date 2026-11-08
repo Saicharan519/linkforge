@@ -47,6 +47,9 @@ fi
 [ -z "$(git status --porcelain)" ] || die "the gitops repo has uncommitted changes"
 if [ "$PUSH" = 1 ]; then git pull --rebase -q; fi
 ek -n kube-system rollout status deploy/sealed-secrets-controller --timeout=120s
+# idempotent: repairs the load balancer controller webhook CA if it does not match (otherwise the Ingresses of the app
+# we are about to enable would be rejected, D90). Does nothing when it already matches.
+"$(dirname "${BASH_SOURCE[0]}")/eks-fix-webhook-ca.sh"
 
 step "2/4 read the database settings from Terraform (nothing secret is printed)"
 tf() { terraform -chdir="$TF_DIR" output -raw "$1"; }

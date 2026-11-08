@@ -109,6 +109,15 @@
       }
     },
     {
+      "Sid": "LookUpServiceLinkedRoles",
+      "Effect": "Allow",
+      "Action": "iam:GetRole",
+      "Resource": [
+        "arn:aws:iam::<ACCOUNT_ID>:role/AWSServiceRoleFor*",
+        "arn:aws:iam::<ACCOUNT_ID>:role/aws-service-role/*"
+      ]
+    },
+    {
       "Sid": "ReadTheRecommendedEksNodeImage",
       "Effect": "Allow",
       "Action": "ssm:GetParameter",
