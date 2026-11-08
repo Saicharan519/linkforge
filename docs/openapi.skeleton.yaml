@@ -1,5 +1,5 @@
 # LinkForge API contract (skeleton) — P0.5
-# Source of truth is ARCHITECTURE.md §4 + PRD.md; gaps are filled by DECISIONS.md D23–D35.
+# Source of truth is ARCHITECTURE.md §4 + docs/PRD.md; gaps are filled by DECISIONS.md D23–D35.
 # The generated OpenAPI of the real app (served at /api/openapi.json when ENABLE_DOCS=true) must match this.
 openapi: 3.1.0
 info:

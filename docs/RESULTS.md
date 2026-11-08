@@ -8,7 +8,7 @@ do not copy my predictions. Empty cells mean "not yet run".
 
 | # | Proof | What I did | Observed (output / time) | Date |
 |---|---|---|---|---|
-| 1 | A push deploys with no manual step | Changed the placeholder page text and pushed (`docs/RUNBOOK-argocd.md` proof 1) | Push `8c64e1e` to linkforge; CI then added bump commit `046945f` to linkforge-gitops (tag `sha-8c64e1e`); Argo rolled both deployments with no manual step (api and frontend pods were replaced, migrate Job re-ran and `Completed`). Timings and the page-text check were not captured | 2026-11-06 |
+| 1 | A push deploys with no manual step | Changed the placeholder page text and pushed (`docs/LEARNING-WALKTHROUGHS.md` proof 1) | Push `8c64e1e` to linkforge; CI then added bump commit `046945f` to linkforge-gitops (tag `sha-8c64e1e`); Argo rolled both deployments with no manual step (api and frontend pods were replaced, migrate Job re-ran and `Completed`). Timings and the page-text check were not captured | 2026-11-06 |
 | 2 | Self-heal | `kubectl scale deploy/api --replicas=5`, then deleted `deploy/frontend` (proof 2) | Extra api pods (`5kj7t`, `7n2rl`, `pt78j`) went to `Terminating` about 13 s after the scale, back to 2 api pods; they ended as `Error` at about 31 s (see note below). `deploy/frontend` deleted; a frontend pod was running again afterwards (recreation timing not captured) | 2026-11-06 |
 | 3 | Bad release keeps old pods serving; `git revert` heals | Set `sha-0000000` as the frontend tag, then `git revert` (proof 3) | New pod `frontend-869849d94d-fnnh7` stuck in `ImagePullBackOff` (0/1) while old pod `frontend-7ccbb9c8f4-2tbv2` stayed `1/1 Running`; `curl http://app.localtest.me/` still returned `<h1>LinkForge</h1>`. Healed with `git revert --no-edit HEAD && git push` (commit 1b75529), no kubectl. Post-revert Argo status: not yet recorded | 2026-11-06 |
 
@@ -33,7 +33,7 @@ by SIGKILL when the grace period ends (exit 137). A READY api container stops in
 exit 0 and a clean "Application shutdown complete" log. The Kubernetes-side timing was not
 measured directly.
 
-## P2 on kind (Redis chart follow-up, docs/RUNBOOK-redis-chart.md)
+## P2 on kind (Redis chart follow-up, docs/LEARNING-WALKTHROUGHS.md)
 
 | Drill | Observed |
 |---|---|
@@ -43,7 +43,7 @@ measured directly.
 | 130 requests through Traefik to the go host: about 120 x 302 then 429 | |
 | go host answers 404 for /healthz and /api/v1/links; app host unrestricted | |
 
-## P3 on kind (click worker chart follow-up, docs/RUNBOOK-p3-chart.md)
+## P3 on kind (click worker chart follow-up, docs/LEARNING-WALKTHROUGHS.md)
 
 | Drill | Observed |
 |---|---|

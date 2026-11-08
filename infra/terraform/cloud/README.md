@@ -78,7 +78,7 @@ export KUBECONFIG=~/.kube/linkforge-eks.yaml        # only in the shell where YO
 EKS control plane (about $0.10/h, billed until the cluster is deleted), the NAT gateway (hourly + per GB), the nodes, two ALBs in HTTP mode (one in domain
 mode), RDS, EBS volumes and public IPv4 addresses. A forgotten environment is the real cost: calendar reminder for the destroy.
 
-## Destroy (in this order; step by step in `docs/RUNBOOK-eks-destroy.md`; steps 1 and 2 are done by `scripts/eks-teardown.sh`)
+## Destroy (in this order; step by step in `docs/RUNBOOK-eks-run-day.md`; steps 1 and 2 are done by `scripts/eks-teardown.sh`)
 1. Delete the Argo CD applications first (cascade): that removes the ALBs, their target groups and security groups, and the Redis PersistentVolumeClaim
    (and with it the EBS volume). If you `terraform destroy` first, orphaned ALBs / ENIs / volumes block the VPC deletion and keep billing.
 2. `terraform destroy` in this directory.

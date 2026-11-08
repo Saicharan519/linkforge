@@ -67,7 +67,7 @@ Infra non-goals: Jenkins, Nexus, SonarQube, ELK, Kafka, Istio, microservices, Ce
 
 ## 6. Non-functional requirements
 - **Degradation behaviour:** the matrix in ARCHITECTURE.md §8, demonstrated by drills.
-- **Security:** argon2id, parameterized queries, CSRF (token + Origin check), rate limits with trusted-proxy-aware IPs, no open redirect to our own domain, HttpOnly cookies, hashed IPs and API keys, no secrets in repo/images/logs, non-root containers, dependency + image scanning gated in CI. See `SECURITY.md`.
+- **Security:** argon2id, parameterized queries, CSRF (token + Origin check), rate limits with trusted-proxy-aware IPs, no open redirect to our own domain, HttpOnly cookies, hashed IPs and API keys, no secrets in repo/images/logs, non-root containers, dependency + image scanning gated in CI. See `docs/SECURITY.md`.
 - **Quality:** ruff clean, tsc strict, tests against real Postgres/Redis in CI. Target ≥ 80% line coverage on backend services (measure it).
 - **Performance (k6, honest reporting):** separate scenarios — warm-cache redirects, mixed/cache-miss redirects, link creation. p50/p95/p99, RPS, error rate (429s reported separately from errors), cache hit ratio, HPA scale-out. Label whether k6 ran inside or outside the cluster.
 - **UI quality:** this is a portfolio piece. A deliberately designed, consistent interface (design system, dark mode, responsive at 1280/390, tasteful charts, good empty/loading states). Screenshots are part of the README.

@@ -1,5 +1,5 @@
 # Helm values for the Traefik ingress controller on kind (chart traefik/traefik, version pinned
-# in docs/RUNBOOK-kind.md). An Ingress object is only a set of ROUTING RULES; a controller like
+# in docs/RUNBOOK-kind-cluster.md). An Ingress object is only a set of ROUTING RULES; a controller like
 # Traefik is the program that reads them and actually forwards the traffic.
 deployment:
   replicas: 1
