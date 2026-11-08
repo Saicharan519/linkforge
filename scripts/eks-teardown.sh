@@ -84,4 +84,4 @@ if [ -n "$pvs" ]; then echo "STILL THERE (PersistentVolume, so maybe an EBS volu
 echo
 echo "The cluster is clean. Next, in YOUR shell:"
 echo "  cd ~/linkforge/infra/terraform/cloud && terraform destroy 2>&1 | tee ~/runlogs/cloud-destroy.log"
-echo "Then the console checklist: docs/RUNBOOK-eks-destroy.md"
+echo "Then the console checklist: docs/RUNBOOK-eks-run-day.md"

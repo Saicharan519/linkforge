@@ -3,10 +3,10 @@
 URL shortener + click analytics platform. Placement/portfolio project: must be correct, tested, observable and deployable — NOT feature-rich. Read this file fully every session.
 
 ## Source of truth (read in this order; the first two are specs, the rest are guidance)
-1. `PRD.md` — WHAT we build (features, acceptance criteria, non-goals)
+1. `docs/PRD.md` — WHAT we build (features, acceptance criteria, non-goals)
 2. `docs/ARCHITECTURE.md` — HOW it works (flows, schema, API, Redis keys, metrics, failure behaviour, budgets, deployment ordering)
 3. `docs/TASKS.md` — phases. ONE phase per session. Append to the Progress Log at the end.
-4. `SECURITY.md` — threat model and controls (consult when touching auth, ingress, secrets, IAM)
+4. `docs/SECURITY.md` — threat model and controls (consult when touching auth, ingress, secrets, IAM)
 5. `docs/DEVOPS_GUIDE.md` — written for the HUMAN to learn DevOps. It is a reference, not a spec. Read the section the current task names (e.g. "§9"); the user has explicitly allowed reading it whole when teaching a phase. Where it conflicts with ARCHITECTURE.md, ARCHITECTURE.md wins.
 6. `docs/DECISIONS.md` — decisions made in design review (D1–D22). If a decision there conflicts with older text elsewhere, DECISIONS.md wins and the older text should be fixed.
 
@@ -57,13 +57,13 @@ docker compose up --build                    # full prod-like stack, UI on :8080
 - **No invention.** If a spec is silent (endpoint, DB field, env var, metric, infra resource, dependency), STOP and ask or propose a documented decision. Do not guess.
 - Plan first: propose a short plan per phase/task and wait for approval before coding.
 - Small commits, one per task, conventional messages (`feat:`, `fix:`, `chore:`, `test:`, `docs:`).
-- Do not add features not in PRD.md. Do not add dependencies without saying why.
+- Do not add features not in docs/PRD.md. Do not add dependencies without saying why.
 - Explicitly NOT in v1: Jenkins, Nexus, SonarQube, ELK, Kafka, Istio, microservices, Celery, OAuth, password reset, geo maps, roles, pricing page, session list/revoke UI, dead-letter replay command, External Secrets/Secrets Manager.
 - Cloud safety: never run `terraform apply/destroy`, mutating `aws` commands, or `kubectl` against a cloud cluster. Never ask for, request, read, or store credentials. Write the code and print the exact command; the human runs it in their own shell. (`.claude/settings.json` denies the dangerous ones; do not try to work around it. Those deny rules are a guardrail, not a boundary: the real control is that cloud credentials never exist in a shell Claude runs in. Since P7 Claude DOES run `kubectl` against the local kind cluster (always `--context kind-linkforge`); the settings deny any kubeconfig or `eks` context, the EKS scripts, and `terraform output/show/state` (they hold the database password).)
 - If two files conflict, stop and ask.
 
 ## Layout
 ```
-backend/ frontend/ infra/ docs/ PRD.md SECURITY.md CLAUDE.md docker-compose.yml .github/workflows/ .claude/settings.json
+backend/ frontend/ infra/ docs/ (PRD.md, SECURITY.md and the other docs live here) CLAUDE.md docker-compose.yml .github/workflows/ .claude/settings.json
 ```
 Scoped rules: `backend/CLAUDE.md`, `frontend/CLAUDE.md`, `infra/CLAUDE.md`.

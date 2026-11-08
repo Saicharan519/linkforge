@@ -1,4 +1,4 @@
-"""CSRF defence for cookie-authenticated requests (ARCHITECTURE §2.4, SECURITY.md).
+"""CSRF defence for cookie-authenticated requests (ARCHITECTURE §2.4, docs/SECURITY.md).
 
 The attack: you are logged in to LinkForge; a page on evil.example makes your browser send
 `POST /api/v1/links/<id>/delete` to us. The browser attaches your session cookie on its own, so

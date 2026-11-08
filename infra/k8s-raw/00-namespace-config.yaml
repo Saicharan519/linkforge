@@ -1,6 +1,6 @@
 # THROWAWAY learning manifests (P1S.4b): the same application as the Helm chart in
 # linkforge-gitops, written out by hand so you can see every Kubernetes object. They are deleted
-# once the chart reproduces them (P1S.4c). Walkthrough: docs/RUNBOOK-k8s-raw.md
+# once the chart reproduces them (P1S.4c). Walkthrough: docs/LEARNING-WALKTHROUGHS.md
 #
 # Apply order is the file-name order: namespace + config first, the database before the things
 # that need it, the Ingress last.

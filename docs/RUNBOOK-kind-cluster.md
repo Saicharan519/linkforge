@@ -1,4 +1,50 @@
-# Runbook: local Kubernetes (kind) cluster
+# Runbook: the local Kubernetes (kind) cluster
+
+This file merges the former `RUNBOOK-bootstrap-kind.md` and `RUNBOOK-kind.md` (2026-11-09; nothing was dropped). Part 1 is the normal way (one command);
+Part 2 is the manual detail behind it.
+
+## Part 1. Build the whole local cluster from nothing (one command)
+
+When: a new machine, a broken cluster, or to prove that git + the sealing-key backup really are enough.
+Everything below was exercised twice on 2026-11-07 (docs/DECISIONS.md D78).
+
+### What you need
+- Docker, `kind`, `kubectl`, `helm`, `python3`, `curl` (all in `~/.local/bin` or on PATH).
+- The repositories `~/linkforge` and `~/linkforge-gitops` (the latter is where Argo CD reads from, on GitHub).
+- **The sealing-key backup** (`~/.sealed-secrets-backup/sealing-key-*.yaml`, or your safe copy). Without it the
+  SealedSecrets in git cannot be decrypted: a new cluster invents a new key. Never put this file in git.
+
+### Run it
+```bash
+cd ~/linkforge
+scripts/bootstrap-kind.sh --key-backup ~/.sealed-secrets-backup/sealing-key-YYYYMMDD-HHMM.yaml
+```
+To start from a clean slate first: `kind delete cluster --name linkforge` (this erases the database inside it).
+It takes about 5 minutes for the script and about 3 more until Argo CD reports everything Healthy.
+
+### What it does, in order (and why that order)
+1. kind cluster (node image pinned by digest). 2. Traefik. 3. metrics-server (kind-only `--kubelet-insecure-tls`).
+4. Argo CD v3.6.1 (exact commit, sha256 checked). 5. The Argo health check for Applications, so the root waits
+for each child to be Healthy. 6. The sealing key is restored BEFORE the controller exists, so it finds and
+uses the old key. 7. `root.yaml`, the only manual apply: it creates `sealed-secrets` (wave -3), then
+`linkforge` (wave 0); inside linkforge: secrets and ConfigMap (-2), Postgres and Redis (-1), the migration
+hook (0), the workloads (1).
+
+### Check
+```bash
+kubectl --context kind-linkforge -n argocd get applications.argoproj.io      # root, sealed-secrets, linkforge: Synced / Healthy
+kubectl --context kind-linkforge -n linkforge get pods                       # 7 pods; migrate is Completed
+curl -s -o /dev/null -w '%{http_code}\n' http://app.localtest.me/             # 200
+curl -s -o /dev/null -w '%{http_code}\n' http://app.localtest.me/api/v1/auth/me   # 401 (not signed in)
+```
+A minute of `Degraded` right at the end is normal (the HPA has no metrics yet); it clears by itself.
+
+### If something fails
+- `--skip-health-fix` exists only to reproduce the experiment that shows why the health check is needed.
+- A stuck or failed migration: docs/LEARNING-WALKTHROUGHS.md, section "Recovery: a failed migration left the sync stuck".
+- The script is safe to re-run: every step checks first. It only talks to the context `kind-linkforge`.
+
+## Part 2. Install and create it by hand (what the script automates)
 
 Everything here runs in your **Ubuntu (WSL) terminal**. Versions are pinned on purpose; bump them
 deliberately, not by accident. Background reading: `docs/DEVOPS_GUIDE.md` §7 and §8.
@@ -11,7 +57,7 @@ deliberately, not by accident. Background reading: `docs/DEVOPS_GUIDE.md` §7 an
 | Traefik chart | traefik/traefik 42.2.0 (Traefik v3.7.16) | ingress controller |
 | metrics-server | v0.9.1 | makes `kubectl top` and, later, the HPA work |
 
-## 1. Install kind and helm
+### 1. Install kind and helm
 
 `helm` was already installed to `~/.local/bin` while preparing this phase. Check both:
 
@@ -35,7 +81,7 @@ echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  kind" | 
 chmod +x kind && mkdir -p ~/.local/bin && mv kind ~/.local/bin/kind && kind version
 ```
 
-## 2. Create the cluster
+### 2. Create the cluster
 
 ```bash
 cd ~/linkforge && kind create cluster --config infra/kind/kind-config.yaml
@@ -49,7 +95,7 @@ kubectl get nodes                      # expect: linkforge-control-plane   Ready
 kubectl get pods -A                    # system pods (coredns, etcd, ...) all Running
 ```
 
-## 3. Install Traefik (the ingress controller)
+### 3. Install Traefik (the ingress controller)
 
 ```bash
 helm repo add traefik https://traefik.github.io/charts && helm repo update
@@ -73,7 +119,7 @@ the proof that traffic reaches it:
 curl -i http://localhost/
 ```
 
-## 4. Install metrics-server
+### 4. Install metrics-server
 
 ```bash
 kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.1/components.yaml
@@ -93,7 +139,7 @@ sleep 30 && kubectl top nodes          # expect CPU and memory numbers, not an e
 
 ("error: Metrics API not available" in the first minute is normal; retry after a moment.)
 
-## 5. Tear down / reset
+### 5. Tear down / reset
 
 ```bash
 kind delete cluster --name linkforge   # removes the whole cluster; everything in it is gone

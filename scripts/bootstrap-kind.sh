@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bootstrap-kind.sh: build the local kind cluster from nothing and hand it to Argo CD.
 #
-# Every step is one the runbooks already describe (docs/RUNBOOK-kind.md, RUNBOOK-argocd.md); this script
+# Every step is one the runbooks already describe (docs/RUNBOOK-kind-cluster.md, LEARNING-WALKTHROUGHS.md); this script
 # only puts them in the one order that works, with the versions pinned, so a new cluster is ONE command:
 #
 #   scripts/bootstrap-kind.sh --key-backup ~/.sealed-secrets-backup/sealing-key-YYYYMMDD-HHMM.yaml
