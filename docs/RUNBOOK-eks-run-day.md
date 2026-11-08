@@ -4,9 +4,9 @@ Read this top to bottom BEFORE you start, once, without typing anything. Then do
 Everything marked **YOU** is typed by you in your own WSL terminal or clicked in the AWS console. Claude never runs anything
 against AWS. When something fails, you paste the log file into the chat and Claude reads it.
 
-Nothing in this file was run against a real AWS account when it was written. The commands come from the repo's own scripts and
-README files and were checked offline only (fmt, validate, Checkov, 43 script checks with fake tools). **Every "expected output"
-below is what should happen, not something that has been seen.** If reality differs, stop and paste the log.
+This guide was written before the first real run and corrected after it (2026-11-08, Sydney, 2 x `m7i-flex.large`). Outputs described as "on the first real run" were SEEN;
+the other "expected" outputs come from reading the scripts and were only checked offline (fmt, validate, Checkov, the offline script test with fake tools).
+**The rebuild path (after a teardown) was found by reviewing this guide and is checked only offline: the first rebuild is its real test.** If reality differs, stop and paste the log.
 
 ---
 
@@ -34,15 +34,14 @@ the first day. The danger is **forgetting to delete it**: an EKS setup left runn
 **Nothing costs money until Step 5, stage 2** (the EKS cluster). Steps 1 to 4 and the VPC stage are free or almost free (the NAT
 gateway is the only hourly item in stage 1, and you will delete it quickly if you stop).
 
-**How long:** plan one free afternoon, about 3 to 4 hours, in ONE sitting. Do not start at night and go to sleep with it running.
-Creating the cluster alone takes about 15 minutes of waiting.
+**How long:** the first real run took most of a day, because of the problems this guide now covers. A clean run should be a few hours (an estimate, NOT measured). Plan one free
+afternoon, in ONE sitting. Do not start at night and go to sleep with it running. Creating the cluster alone takes about 15 minutes of waiting.
 
 **What can go wrong (honest list):**
-1. Your account may not be allowed to create EKS, a NAT gateway, RDS or a load balancer (it is a new-style Free-plan account and
-   this is NOT confirmed). Then Terraform shows `AccessDenied` or "not available on the Free plan". That is not your mistake.
-2. The server type may not be allowed. We check before paying.
-3. Some assumptions in my design may be wrong (for example, the two Ingresses might share one load balancer). The scripts check
-   these and stop with a clear message.
+1. (Settled on the first real run) This account IS allowed to create EKS, a NAT gateway, RDS, load balancers and `m7i-flex.large` nodes. Every failure of that run was a missing
+   permission or a design gap of ours, listed in the steps below. If you ever use ANOTHER account, `AccessDenied` or "not available on the Free plan" may mean the account refuses.
+2. The two Ingresses DID get two different load balancers (the HTTP-mode design held); `eks-set-hosts.sh` still checks it and stops with a clear message if not.
+3. Anything new: stop and paste the log.
 
 **When to STOP and not continue:**
 - any step says `AccessDenied`, `not authorized`, `not available on the Free plan`, `quota`: stop, paste the log in chat;
@@ -50,6 +49,35 @@ Creating the cluster alone takes about 15 minutes of waiting.
 - the bill or credits look wrong in the console.
 
 **The golden rule:** if you are unsure at any moment, do not type the next command. Paste what you see in the chat.
+
+---
+
+## Rebuilding after a teardown (read this first if you already did the first run once)
+
+Steps 1 and 2 are done for good: the account check and the IAM policies stay in your account (as do the S3 state bucket and the IAM user). After a teardown only these things are
+stale or missing. Do them in this order, then continue with Step 3:
+
+1. **Reactivate the access key** that you deactivated at the end of the last run: IAM, Users, `linkforge-terraform`, Security credentials, the key, **Activate**. (If you deleted it,
+   create a new one and store it with `aws configure --profile linkforge`; never paste a key anywhere.)
+2. **Step 3** (read-only checks) proves the key works.
+3. **Step 4:** `terraform.tfvars` and `backend.hcl` still exist in `infra/terraform/cloud` (they are git-ignored). Do NOT copy the examples again (that overwrites them); open
+   `terraform.tfvars` and only update `admin_cidrs` with your current addresses (Step 4a).
+4. **Reset the GitOps repository.** The first run leaves it in the "enabled" state: the app sits in `argocd/eks/apps/`, `envs/eks/sealed.values.yaml` is sealed for the OLD cluster's
+   key (a new cluster cannot read it), and `envs/eks/values.yaml` holds the old load balancer names and your addresses. Started from that state, the bootstrap would deploy the app at
+   once with an unreadable secret, Step 8 would find no placeholder, and Step 9 would refuse. This script reverses those edits (git only: no AWS, no cluster; it refuses while a cluster still answers on `KUBECONFIG`):
+
+```bash
+cd ~/linkforge
+```
+
+```bash
+bash scripts/eks-reset-gitops.sh
+```
+
+   Expected: lines saying it moved the Application back to `argocd/eks/pending/` and removed `envs/eks/sealed.values.yaml`, a short diff summary, and `pushed.` Running it again says
+   `nothing to do`. Make sure `KUBECONFIG` is not set in this terminal.
+5. **Delete the old load-test key** if it exists: `rm -rf ~/.linkforge-k6` (it belongs to the old database; `seed.sh` would otherwise reuse it).
+6. `~/.kube/linkforge-eks.yaml` was removed at the teardown; Step 6 creates it again.
 
 ---
 
@@ -234,7 +262,7 @@ aws sts get-caller-identity
 ```
 
 Expected: three lines with `UserId`, `Account` (your 12 digits) and `Arn` ending in `user/linkforge-terraform`. If you see
-`InvalidClientTokenId` or `ExpiredToken`, the key in `~/.aws` is wrong or inactive. Stop and tell Claude (do not paste the keys).
+`InvalidClientTokenId` or `ExpiredToken`, the key in `~/.aws` is wrong or inactive (after a teardown it is usually inactive: see "Rebuilding after a teardown"). Stop and tell Claude (do not paste the keys).
 
 ### 3c. Is each server type allowed in Sydney?
 
@@ -296,6 +324,8 @@ If your provider changes the address during the day (restarting the router can d
 
 ### 4b. Create `terraform.tfvars`
 
+**On a rebuild the file already exists: skip the `cp` below (it would overwrite it) and only edit `admin_cidrs`.**
+
 ```bash
 cd ~/linkforge/infra/terraform/cloud
 ```
@@ -326,6 +356,8 @@ node_max_size       = 3
 Leave `domain_name` commented out (HTTP mode). To save: `Ctrl+O`, then `Enter`. To leave: `Ctrl+X`.
 
 ### 4c. Create `backend.hcl`
+
+**On a rebuild this file already exists too: skip this whole sub-step.**
 
 ```bash
 cp ../backend.hcl.example backend.hcl
@@ -499,7 +531,7 @@ cd ~/linkforge
 ```
 
 ```bash
-scripts/bootstrap-eks.sh 2>&1 | tee ~/runlogs/bootstrap-eks.log
+bash scripts/bootstrap-eks.sh 2>&1 | tee ~/runlogs/bootstrap-eks.log
 ```
 
 Expected: six numbered steps. Step 5 prints a line every 15 seconds like
@@ -525,7 +557,7 @@ kubectl -n kube-system logs deploy/aws-load-balancer-controller --tail=40
 
 ## Step 8. Put your IP into the app settings (gitops repo)
 
-**Why:** the two load balancers must only accept YOUR IP, because there is no HTTPS.
+**Why:** the two load balancers must only accept YOUR IP, because there is no HTTPS. (On a rebuild this works only after `bash scripts/eks-reset-gitops.sh` from "Rebuilding after a teardown": the placeholder `REPLACE_WITH_YOUR_IP/32` must be back in the file.)
 
 ```bash
 cd ~/linkforge-gitops
@@ -574,7 +606,7 @@ cd ~/linkforge
 ```
 
 ```bash
-scripts/eks-seal-and-enable.sh 2>&1 | tee ~/runlogs/eks-seal-and-enable.log
+bash scripts/eks-seal-and-enable.sh 2>&1 | tee ~/runlogs/eks-seal-and-enable.log
 ```
 
 Expected: four numbered steps; it prints the database user and host, the PASSWORD LENGTH only (never the password), and the length of the
@@ -617,7 +649,7 @@ Run it every minute. Expected after 2 to 5 minutes: two rows, `app` and `go`, ea
 **The two addresses must be different.** (A new ALB needs another 1 to 2 minutes before it answers.)
 
 ```bash
-scripts/eks-set-hosts.sh 2>&1 | tee ~/runlogs/eks-set-hosts.log
+bash scripts/eks-set-hosts.sh 2>&1 | tee ~/runlogs/eks-set-hosts.log
 ```
 
 Expected: `two different load balancers:` with the names, then `pushed. The pods roll once.`. If it says BOTH Ingresses share ONE load balancer, stop:
@@ -626,7 +658,7 @@ the design must change, paste the log, nothing was altered.
 Wait about 3 minutes for the pods to restart, then:
 
 ```bash
-scripts/eks-verify.sh 2>&1 | tee ~/runlogs/eks-verify.log
+bash scripts/eks-verify.sh 2>&1 | tee ~/runlogs/eks-verify.log
 ```
 
 Expected: PASS lines and at the end `ALL CHECKS PASSED`. If any line says FAIL, paste `~/runlogs/eks-verify.log`.
@@ -646,8 +678,55 @@ kubectl -n linkforge get ingress
 4. Create a short link. The UI shows it as `http://<the go address>/<code>`. Open it in another tab: it must redirect. Open the analytics page: the click must appear.
 5. Take screenshots (dashboard, the short link, the analytics page).
 
-After this works, tell Claude "Step 11 works". Then comes P10: k6 load test on AWS, the failure drills, the screenshots and `RESULTS.md`. Claude will give a
-detailed guide for it then. Keep the cluster running only as long as you need it.
+After this works, tell Claude "Step 11 works". Keep the cluster running only as long as you need it.
+
+### Step 11b (optional): the load test and the drills, as done on the first real run
+The numbers of that run are in `docs/RESULTS.md`; the files are `infra/k6/` (`README.md`, `k6-job-eks.yaml`) and `infra/k6/eks-drills/` (four drill scripts, see its README). Terminal with `KUBECONFIG` set:
+
+1. Raise the app's rate limits (one k6 pod is ONE client address): in `~/linkforge-gitops/envs/eks/values.yaml`, under `config:`, add `RATE_LIMIT_REDIRECT_PER_MIN: "1000000"` and
+   `RATE_LIMIT_CREATE_PER_MIN: "1000000"`; commit with a message that says TEMPORARY; push; wait until the `api` pods have restarted (`kubectl -n linkforge get pods`).
+   When you are done, undo it with `git revert` of that commit and push.
+2. Make a throw-away test user and API key (use YOUR app address; `rm -rf ~/.linkforge-k6` first if it exists):
+
+```bash
+bash ~/linkforge/infra/k6/seed.sh http://<the app address>
+```
+
+3. Hand the files to the cluster, one command at a time (from `~/linkforge`):
+
+```bash
+kubectl create namespace k6
+```
+
+```bash
+kubectl -n k6 create configmap k6-scripts --from-file=infra/k6/load.js
+```
+
+```bash
+kubectl -n k6 create secret generic k6-api-key --from-file=api_key=$HOME/.linkforge-k6/api_key
+```
+
+```bash
+kubectl -n k6 create configmap k6-hosts --from-literal=go_host="$(kubectl -n linkforge get ingress go -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')" --from-literal=app_host="$(kubectl -n linkforge get ingress app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+```
+
+4. Run ONE scenario at a time (`redirect_warm`, then `redirect_mixed`, then `create`), about 3 minutes each, and read the result:
+
+```bash
+sed 's/__ONLY__/redirect_warm/' infra/k6/k6-job-eks.yaml | kubectl apply -f -
+```
+
+```bash
+kubectl -n k6 logs job/k6-load | sed -n '/THRESHOLDS/,$p'
+```
+
+```bash
+kubectl -n k6 delete job k6-load
+```
+
+5. The drills (each prints its own timeline and a summary; they need the raised limits): `bash infra/k6/eks-drills/drill-pod.sh`, `drill-redis.sh`, `drill-worker.sh` (two commits in the gitops
+   repo, made and reverted by the script) and `drill-badtag.sh` (same). Do not push to either repository while a drill runs.
+6. Numbers measured this way are CLIENT-side from a pod inside the cluster straight to the API Service; the load balancers are not in them (see `docs/RESULTS.md`).
 
 ---
 
@@ -662,11 +741,11 @@ cd ~/linkforge
 ```
 
 ```bash
-scripts/eks-teardown.sh 2>&1 | tee ~/runlogs/eks-teardown.log
+bash scripts/eks-teardown.sh 2>&1 | tee ~/runlogs/eks-teardown.log
 ```
 
 It asks you to type the first part of the cluster's host name (it is printed). Type exactly that. Expected: five numbered steps and it ends with `The cluster is clean.` If it prints
-`STILL THERE`, do NOT continue: paste the log. If it says `Permission denied`, run it as `bash scripts/eks-teardown.sh ...` (the file lacks its "run" flag on your copy).
+`STILL THERE`, do NOT continue: paste the log. (Every script command in this guide starts with `bash` because git stores the scripts without the "run" flag; without `bash` you get `Permission denied`.)
 
 **Why step 2/5 switches off the root application's auto-sync (found on the first real teardown):** Argo CD's `root` application has the `linkforge` application in git and heals itself. With
 auto-sync still on, the root re-created the application, its namespace, the Redis disk claim and the load balancers seconds after the script deleted them, and the script's last check stopped at
@@ -675,6 +754,14 @@ auto-sync still on, the root re-created the application, its namespace, the Redi
 kubectl -n argocd patch application root --type merge -p '{"spec":{"syncPolicy":null}}'
 ```
 and then the script again. It is safe to repeat.
+
+Before Terraform, check that no load balancer is left in AWS (a leftover blocks the deletion of the network and keeps billing):
+
+```bash
+aws elbv2 describe-load-balancers --region ap-southeast-2 --query 'LoadBalancers[].LoadBalancerName' --output text
+```
+
+Expected: nothing printed. A name starting with `k8s-linkforg-`: wait a minute and run it again; if it stays, paste it and do not continue.
 
 Then Terraform:
 
@@ -686,8 +773,14 @@ cd ~/linkforge/infra/terraform/cloud
 terraform destroy 2>&1 | tee ~/runlogs/cloud-destroy.log
 ```
 
-Type `yes`. Expected: 15 to 25 minutes, ends with `Destroy complete! Resources: ... destroyed.` If it fails (often a security group or network interface
-that cannot be deleted), paste the log. Do not give up and leave: leftovers keep billing.
+Type `yes`. Expected: about 20 to 30 minutes, ends with `Destroy complete! Resources: ... destroyed.` (68 on the first real run). If it fails (often a security group or network interface
+that cannot be deleted), paste the log. Do not give up and leave: leftovers keep billing. When it is done:
+
+```bash
+terraform state list
+```
+
+Expected: no output at all. Anything printed is still alive.
 
 ### Console check (browser, Sydney region selected)
 Open each service and check the list is empty of linkforge items (your own `orderintel` EC2 instance is NOT part of this and stays):
@@ -701,21 +794,30 @@ Anything left with the tag `Project = linkforge`: delete it by hand and tell Cla
 1. IAM, Users, `linkforge-terraform`, tab **Security credentials**: **Deactivate** the access key (or delete it) when all AWS work is finished. If you will not do another run,
    remove the two managed policies: IAM, Users, `linkforge-terraform`, Permissions: tick `linkforge-p9` and `linkforge-preflight`, **Remove**; then IAM,
    **Policies**, search `linkforge`, select each, **Actions, Delete**.
-2. Delete your private policy copy:
+2. Delete your private policy copy, the saved plan (it contains the database password) and the cluster's kubeconfig:
 
 ```bash
 rm ~/iam-policy-p9.mine.json
 ```
 
+```bash
+rm ~/linkforge/infra/terraform/cloud/tfplan
+```
+
+```bash
+rm ~/.kube/linkforge-eks.yaml
+```
+
 3. Close the terminal window (this removes `AWS_PROFILE` and `KUBECONFIG`).
-4. **Next day:** Billing, **Bills** and **Credits**. Compare with the number from Step 1. Costs appear with a delay of up to a day. Paste the figures in the chat and
+4. To rebuild later, follow "Rebuilding after a teardown" at the top.
+5. **Next day:** Billing, **Bills** and **Credits**. Compare with the number from Step 1. Costs appear with a delay of up to a day. Paste the figures in the chat and
    Claude records them in the results.
 
 ---
 
 ## Appendix: common problems
 
-- **My IP changed** (`kubectl` hangs, the site does not open): get the new IP, edit `admin_cidrs` in `terraform.tfvars` and run `terraform apply`; edit `inbound-cidrs` in
+- **My IP changed** (`kubectl` hangs, the site does not open): get the new IP, edit `admin_cidrs` in `terraform.tfvars` and run `terraform apply`; edit `inbound-cidrs` (a comma-separated list if you have several addresses) in
   `~/linkforge-gitops/envs/eks/values.yaml`, commit and push.
 - **I closed the terminal in the middle**: open a new one and type again `export AWS_PROFILE=linkforge` and `export KUBECONFIG=~/.kube/linkforge-eks.yaml`, then continue
   with the step you were on. Terraform remembers what exists (the state is in the S3 bucket).
@@ -726,7 +828,7 @@ rm ~/iam-policy-p9.mine.json
 
 ## Appendix A. Destroy details, read-only checks and the console checklist
 
-(Merged on 2026-11-09 from the former `RUNBOOK-eks-run-day.md`, "Runbook: destroy the EKS demo (P9.4)"; Step 12 above is the short version, nothing was dropped.)
+(Merged on 2026-11-09 from the former `RUNBOOK-eks-destroy.md`, "Runbook: destroy the EKS demo (P9.4)"; Step 12 above is the short version, nothing was dropped.)
 
 EKS has no pause button. The control plane bills until the cluster is deleted, and a few things created by controllers INSIDE the
 cluster (the two ALBs, the Redis EBS volume) are invisible to Terraform. Follow this order. Set a calendar reminder when you apply.
@@ -738,9 +840,10 @@ cluster (the two ALBs, the Redis EBS volume) are invisible to Terraform. Follow 
 
 ### 1. Kubernetes side (script)
 ```bash
-scripts/eks-teardown.sh 2>&1 | tee ~/runlogs/eks-teardown.log
+bash scripts/eks-teardown.sh 2>&1 | tee ~/runlogs/eks-teardown.log
 ```
 It asks you to type the cluster's API host name, then:
+0. switches off the auto-sync of Argo CD's `root` Application (otherwise the root re-creates what is deleted next; found on the first real teardown);
 1. deletes the `linkforge` Application (cascade): the two Ingresses go. The load balancer controller deletes each ALB (and its target group and security
    group) BEFORE it lets the Ingress disappear, so "no Ingress left" means "the ALBs are being or have been deleted";
 2. deletes the namespace `linkforge`: removes the Redis claim, and with it the EBS volume (the StorageClass reclaim policy is `Delete`);
@@ -753,7 +856,7 @@ If you enabled the optional monitoring app nothing extra is needed (its storage 
 ### 2. Terraform side (you)
 ```bash
 cd ~/linkforge/infra/terraform/cloud
-terraform destroy 2>&1 | tee ~/runlogs/cloud-destroy.log      # READ the plan of deletions; it takes about 10-15 minutes
+terraform destroy 2>&1 | tee ~/runlogs/cloud-destroy.log      # READ the plan of deletions; it takes about 20-30 minutes
 ```
 If it fails with `DependencyViolation` on a subnet or the VPC: something still uses a network interface or security group in it. Almost always an ALB
 or its security group that step 1 did not finish. Find it (checks below), remove it, run `terraform destroy` again (it is safe to repeat).
@@ -779,7 +882,7 @@ A domain registration is a separate purchase: deleting a zone does not cancel it
 ### 5. After the destroy
 - Narrow the IAM policy of `linkforge-terraform` back to the state-bucket-only policy (`infra/terraform/bootstrap/README.md`) and set its access key
   **inactive** (or delete it) in the IAM console.
-- Delete `~/.kube/linkforge-eks.yaml` (it points at a cluster that no longer exists) and unset `KUBECONFIG`.
+- Delete `~/.kube/linkforge-eks.yaml` (it points at a cluster that no longer exists) and unset `KUBECONFIG`; delete `infra/terraform/cloud/tfplan` (it holds the database password).
 - The state bucket (`linkforge-tfstate-<account>`) stays: it costs next to nothing and holds the state history.
 - **Next day:** Billing, Cost Explorer, daily cost: the stack's services should be about zero. If something still bills, it is in step 3 or 4.
 - Record in `docs/TASKS.md`: what was destroyed, what the checks printed, what the credit balance is now.
