@@ -1,0 +1,55 @@
+# The load test as a Job INSIDE the EKS cluster (P10.1). Same idea as k6-job.yaml (kind), different target:
+#
+#   - k6 talks to the API's own Service (api.linkforge:8000), NOT through the ALBs. Why: the two ALBs only accept the
+#     operator's IP addresses (HTTP mode, no TLS), and a pod's traffic would leave through the NAT gateway, whose address
+#     is not on that list. Going through the Service also keeps the operator's home connection (hundreds of ms away from
+#     Sydney) out of the numbers. CONSEQUENCE, say it whenever the numbers are quoted: the ALB hop is NOT measured here.
+#   - The API's host guard serves redirects only on the short-link host, so k6 sends the real ALB names as Host headers
+#     (GO_HOST, APP_HOST), read from the ConfigMap `k6-hosts` that the run guide creates from the live Ingresses.
+#   - ONLY (which scenario) is a placeholder: `sed 's/__ONLY__/redirect_warm/' infra/k6/k6-job-eks.yaml | kubectl apply -f -`.
+#
+# Not managed by Argo CD: a throw-away experiment in its own namespace `k6`.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: k6
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-load
+  namespace: k6
+spec:
+  backoffLimit: 0 # a failed load test is a result, not something to retry
+  ttlSecondsAfterFinished: 7200
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext: {runAsNonRoot: true, runAsUser: 12345, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: k6
+          # grafana/k6 v2.3.0, pinned by digest (a tag can be re-pointed); pulled from Docker Hub through the NAT gateway
+          image: grafana/k6@sha256:3e4186aea62e11a45560bfc51e19eeafe82fc07ce069c78aff44b7ff893d9a5e
+          args: ["run", "/scripts/load.js"]
+          env:
+            - {name: GO_URL, value: "http://api.linkforge.svc.cluster.local:8000"}
+            - {name: APP_URL, value: "http://api.linkforge.svc.cluster.local:8000"}
+            - name: GO_HOST
+              valueFrom: {configMapKeyRef: {name: k6-hosts, key: go_host}}
+            - name: APP_HOST
+              valueFrom: {configMapKeyRef: {name: k6-hosts, key: app_host}}
+            - {name: DURATION, value: "3m"}
+            - {name: WARM_RATE, value: "200"} # the drills lower it: sed 's/WARM_RATE, value: "200"/WARM_RATE, value: "100"/'
+            - {name: ONLY, value: "__ONLY__"}
+            - {name: LINKS, value: "200"} # 1000 on kind; fewer here keeps setup() short and the free-plan EBS/DB small
+            - name: API_KEY
+              valueFrom: {secretKeyRef: {name: k6-api-key, key: api_key}}
+          resources:
+            requests: {cpu: 500m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+      volumes:
+        - name: scripts
+          configMap: {name: k6-scripts}
