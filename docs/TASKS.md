@@ -28,7 +28,7 @@ DevOps pointer: §1, §6.
 Goal: catch contradictions before any code exists.
 - ☐ P0.5.1 Read docs/PRD.md, ARCHITECTURE.md, TASKS.md, docs/SECURITY.md, the CLAUDE.md files. List every contradiction, ambiguity, or missing decision. Do not fix silently — list them.
 - ☐ P0.5.2 Propose the final API contract as an OpenAPI skeleton (paths, request/response schemas, error shape) and confirm the data model + indexes against ARCHITECTURE §3–4.
-- ☐ P0.5.3 Write `docs/TRACEABILITY.md`: table PRD requirement → task id → test name(s).
+- ☑ P0.5.3 Wrote `docs/TRACEABILITY.md` (PRD requirement → task id → planned test names). **Removed on 2026-11-09**: it held PLANNED test names that were never checked against the real tests, so it could mislead; the evidence lives in `docs/VERIFICATION.md` and `docs/RESULTS.md`; the file is in git history.
 Done when: you've read the list, answered every open question (decisions recorded in `docs/DECISIONS.md`), and approved the contract.
 Prompt:
 > Read CLAUDE.md, docs/PRD.md, docs/ARCHITECTURE.md, docs/SECURITY.md, docs/TASKS.md. Do P0.5 only: list contradictions/ambiguities/missing decisions, propose an OpenAPI skeleton, and produce docs/TRACEABILITY.md. Do not write application code. Wait for my answers.
