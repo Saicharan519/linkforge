@@ -181,5 +181,44 @@ and Postgres 0.14: neither was the limit. So capacity on this machine is roughly
 (every push to the linkforge main branch redeploys, even docs-only pushes; 0.69% failed, max 28.8 s), and was discarded; the third, reported above, is clean. Do not push to linkforge main while a drill runs.
 
 **Already proven in earlier phases (not repeated):** bad image tag, failing migration, drift, Trivy blocking CI, worker idempotency tests (see the P1S/P7 sections).
-**NOT done:** worker crash-after-commit under load (covered by tests only); a drain of the node; Postgres down; any of this on EKS; existing sessions surviving a Redis loss (only fresh logins were probed).
+**NOT done:** worker crash-after-commit under load (covered by tests only); a drain of the node; Postgres down; any of this on EKS; existing sessions surviving a Redis loss (only fresh logins were probed). (EKS: see the next section.)
+
+## P10: the same tests on EKS (2026-11-08)
+
+Setup: EKS 1.36 in ap-southeast-2, 2 x `m7i-flex.large` managed nodes (2 vCPU, 8 GiB each), RDS PostgreSQL 16 (`db.t4g.micro`, TLS `verify-full`), Redis in the cluster on an EBS gp3
+volume, two ALBs in HTTP mode (no TLS), images `sha-32c77ee` from GHCR, **no Prometheus** (monitoring left off to save pod slots), so there are no server-side histograms here: all latencies below
+are k6's own, **client-side from a pod inside the cluster to the `api` Service**. The ALB hop and the internet are NOT in these numbers (the ALBs only admit the operator's two public addresses, and the
+operator's connection is far from Sydney). k6 v2.3.0 as a Job (`infra/k6/k6-job-eks.yaml`, 200 test links instead of 1,000). The app's rate limits were raised for the tests (gitops `b784c80`) and **reverted** (`d18b29d`).
+
+| Run | Load | Result |
+|---|---|---|
+| A. warm cache | one hot code, 200 req/s for 3 min, started with 2 api pods | 36,201 requests (36,001 iterations), **100% 302**, 0 x 429, 0 failed. Redirect scenario: avg 2.6 ms, **p95 3.41 ms**, max 56 ms. HPA 2 to **5** pods within about a minute (CPU 185% of request), settled near 75%, and fell back (3, then 2) after the load stopped. |
+| B. mixed | 50 req/s over 200 codes (+5% unknown, expected 404), 3 min | 9,001 iterations, 8,999 correct, **2 failed (0.02%)**, 0 x 429. Redirect scenario p95 **7.43 ms**. The 2 failures show `min=0s` (the connection broke at once). Probable cause: the HPA was removing pods (5 to 3) at that moment. NOT proven. |
+| C. create | 20 creates/min, 3 min | 61 creates, **all 201**, 0 x 429. Overall p95 72 ms, but that figure also contains the 200 creates of the test's own setup (50 in parallel), so it is not a clean per-create number. |
+
+Click accounting after run A: the worker had read 36,005 entries (36,001 from k6 plus about 4 manual clicks), lag 0, pending 0. Rows in RDS were NOT compared with the sent count (RDS is private; no query was run).
+
+Drills (100 req/s warm redirects from the in-cluster k6 Job; scripts in `infra/k6/eks-drills/`, run by the operator, logs in `~/runlogs/drill-*.log`):
+
+| Drill | What was done | Measured |
+|---|---|---|
+| Kill an API pod | `kubectl delete pod` of one api pod 30 s into the load, 3 pods running (the HPA had added one) | **0 of 18,201 requests failed**, 18,001 x 302, p95 3.22 ms, max 66 ms. Ready/desired went 2/3 after 4 s and 3/3 after 9 s. One run. (A first attempt killed the pod after the load had ended and was discarded.) |
+| Kill Redis | `kubectl delete pod redis-0` 30 s into the load | Ready again **20 s** after the delete. **0 of 18,201 failed**, 18,001 x 302, p95 7.54 ms (3.2 ms without the drill), max 67 ms. The stream survived the restart (80,556 entries before, 84,934 right after, 97,047 at the end). **Clicks: 18,001 sent, 16,491 read by the worker, so 1,510 (8.4%) were not recorded** (about 15 s of an unreachable Redis at 100/s); the app's own dropped counter was not read (no Prometheus). Redis came back on the **same node**, so no EBS detach/attach happened and the cross-node case is UNTESTED (a gp3 volume is bound to one availability zone: if that node or zone is lost Redis can only restart in the same zone; this is reasoning, not a test). |
+| Kill the worker | `worker.replicas: 0` pushed to gitops, 100 req/s for 1 min, then `git revert` | Zero worker pods about 30 s after the push. **0 of 6,201 requests failed**, 6,001 x 302, p95 4.29 ms. Lag grew to **6,001** (pending 0). After the revert the worker was ready 33 s later and the backlog drained **within 9 s**. **Clicks sent 6,001, read 6,001: no loss.** The stream stopped at 100,008 entries (its cap). |
+| Bad image tag (frontend) | frontend tag set to a non-existent one via git, then `git revert` | The new pod went `ErrImagePull` / `ImagePullBackOff`; the old pod was never touched (same pod, always 1/1 Running). `GET /` through the ALB returned **200 in all 13 samples** (one every 14 s from the operator's PC, so a sample, not continuous traffic). Rollback by `git revert`: rollout finished in **19 s**, Argo `Synced/Healthy`. Done on the frontend on purpose: the API image also runs the migration hook and a bad API tag leaves the sync stuck (not tested here). |
+
+**Problems found on the first real apply (all fixed or documented; none was an AWS refusal of EKS, NAT, RDS, ALB or the instance type):**
+1. The IAM policy for the person running Terraform was incomplete: `ssm:GetParameter` (node image lookup) and `iam:GetRole` on AWS's service-linked roles (EKS checks them by role name, which has no path) were missing. Inline policies are capped at 2048 characters per user, so the policy is a managed one.
+2. Staging with `-target=module.eks` skipped the policy attachment of the EBS CSI role (a separate resource): the CSI controller crash-looped on `ec2:DescribeAvailabilityZones`; the full apply fixed it (the add-on was replaced; one 409 "association already exists" cleared on a retry).
+3. The NAT gateway creation timed out at 10 min on the client side (state `pending`); it was available afterwards. Cause not established (AWS slowness or the operator's connection; the connection dropped several times that day).
+4. `kubeseal` failed: it reaches the controller through the API's service proxy on port 8080 and the node security group did not admit the control plane there. Fixed in code (PR 15).
+5. The load balancer controller's webhook certificates did not match (`ignoreDifferences` kept values from different renders), so Argo could not create the Ingresses. Fixed live by copying the secret's CA into both webhook configurations. **NOT yet fixed in git.**
+6. The operator's public IP alternates between two addresses; both are in `admin_cidrs` and in the ALBs' `inbound-cidrs`.
+7. A harmless perpetual plan difference on the RDS parameter group (`apply_method`).
+
+**Screenshots** (`docs/screenshots/`, taken on 2026-11-08 while the cluster was up): `argocd-linkforge.png` (Argo CD: the `linkforge` application Synced and Healthy, 14 resources, 0 out of sync, two ALBs, two Ingresses),
+`aws-eks.png` (EKS console: cluster `linkforge`, Active, Kubernetes 1.36, 0 cluster health issues; account ID hidden), `app-analytics.png` (the analytics page of a short link on the AWS deployment: 2 clicks).
+No Grafana screenshot exists: there is no Prometheus or Grafana on EKS.
+
+**NOT done / NOT verified:** server-side latency or Prometheus numbers on EKS; the ALB hop and a client on the internet; Postgres row counts against clicks sent; EBS reattach on another node; the default-limits rate limiter test on EKS; a bad API image tag; Slack; the real cost (read it from Billing the day after: the figure is added when known).
 
