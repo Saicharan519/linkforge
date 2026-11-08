@@ -144,6 +144,25 @@ grep -q "^  SHORT_URL_BASE: http://$GO\$" "$v" && grep -q "^  PUBLIC_REDIRECT_HO
 grep -v "^[[:space:]]*#" "$v" | grep -q "pending.invalid" && bad "pending.invalid is still in a value of values.yaml" || ok "no pending.invalid left in any value"
 helm template linkforge "$T/gitops/charts/linkforge" -n linkforge -f "$v" -f "$T/gitops/envs/eks/sealed.values.yaml" > /dev/null 2>&1 && ok "the chart still renders with the real hosts" || bad "chart render failed after set-hosts"
 
+echo "== eks-reset-gitops.sh (the rebuild path, D91)"
+cd "$T/gitops"
+{ [ -f envs/eks/sealed.values.yaml ] && [ -f argocd/eks/apps/linkforge.yaml ] && [ ! -e argocd/eks/pending/linkforge.yaml ]; } && ok "starting point is the 'enabled' state a finished first run leaves" || bad "unexpected starting point"
+cd "$HERE"
+KUBECONFIG="$T/eks.yaml" expect_fail "refuses while a cluster still answers on KUBECONFIG" "still answers" "$HERE/eks-reset-gitops.sh" --no-push
+env -u KUBECONFIG "$HERE/eks-reset-gitops.sh" --no-push > "$T/reset.log" 2>&1 && ok "runs on the enabled state (no cluster reachable)" || bad "reset failed: $(tail -3 "$T/reset.log")"
+cd "$T/gitops"
+{ [ -f argocd/eks/pending/linkforge.yaml ] && [ ! -e argocd/eks/apps/linkforge.yaml ]; } && ok "the Application is back in pending/" || bad "Application not moved back"
+[ ! -e envs/eks/sealed.values.yaml ] && ok "the sealed values (for the old cluster) are gone" || bad "sealed.values.yaml still there"
+v=envs/eks/values.yaml
+grep -q '^  SHORT_URL_BASE: http://pending.invalid$' "$v" && grep -q '^  PUBLIC_REDIRECT_HOST: pending.invalid$' "$v" && grep -q '^  ALLOWED_ORIGINS: http://pending.invalid$' "$v" && grep -q 'inbound-cidrs: REPLACE_WITH_YOUR_IP/32$' "$v" && ok "hosts are pending.invalid again and the CIDR placeholder is back" || bad "values.yaml not reset"
+git log -1 --format=%s | grep -q "reset to the fresh-cluster state" && ok "one commit holds the reset" || bad "unexpected commit"
+cd "$HERE"
+env -u KUBECONFIG "$HERE/eks-reset-gitops.sh" --no-push > "$T/reset2.log" 2>&1 && grep -q "nothing to do" "$T/reset2.log" && ok "a second run finds nothing to do" || bad "second reset: $(tail -2 "$T/reset2.log")"
+expect_fail "after the reset the seal script refuses until the addresses are set again" "REPLACE_" "$HERE/eks-seal-and-enable.sh" --no-push
+sed -i 's|REPLACE_WITH_YOUR_IP/32|203.0.113.7/32|' "$T/gitops/envs/eks/values.yaml"
+git -C "$T/gitops" commit -qam "test: set the CIDR again"
+"$HERE/eks-seal-and-enable.sh" --no-push > "$T/seal-again.log" 2>&1 && ok "the seal script works again after a reset (full round trip)" || bad "seal after reset failed: $(tail -3 "$T/seal-again.log")"
+
 echo "== eks-teardown.sh"
 export KLOG="$T/kubectl.log" TFLOG="$T/terraform.log"
 : > "$KLOG"; : > "$TFLOG"
@@ -197,7 +216,7 @@ rm -f "$T/app-deleted" "$T/ns-deleted"
 FAKE_NS_RECREATED=1 expect_fail "stops when the namespace was re-created" "was re-created" "$HERE/eks-teardown.sh" --yes
 
 echo "== syntax"
-for f in eks-common.sh bootstrap-eks.sh eks-seal-and-enable.sh eks-set-hosts.sh eks-verify.sh eks-teardown.sh eks-fix-webhook-ca.sh test-eks-scripts.sh; do
+for f in eks-common.sh bootstrap-eks.sh eks-seal-and-enable.sh eks-set-hosts.sh eks-verify.sh eks-teardown.sh eks-fix-webhook-ca.sh eks-reset-gitops.sh test-eks-scripts.sh; do
   bash -n "$HERE/$f" && ok "bash -n $f" || bad "syntax error in $f"
 done
 if command -v shellcheck > /dev/null; then
