@@ -665,8 +665,16 @@ cd ~/linkforge
 scripts/eks-teardown.sh 2>&1 | tee ~/runlogs/eks-teardown.log
 ```
 
-It asks you to type the first part of the cluster's host name (it is printed). Type exactly that. Expected: it ends with `The cluster is clean.` If it prints
-`STILL THERE`, do NOT continue: paste the log.
+It asks you to type the first part of the cluster's host name (it is printed). Type exactly that. Expected: five numbered steps and it ends with `The cluster is clean.` If it prints
+`STILL THERE`, do NOT continue: paste the log. If it says `Permission denied`, run it as `bash scripts/eks-teardown.sh ...` (the file lacks its "run" flag on your copy).
+
+**Why step 2/5 switches off the root application's auto-sync (found on the first real teardown):** Argo CD's `root` application has the `linkforge` application in git and heals itself. With
+auto-sync still on, the root re-created the application, its namespace, the Redis disk claim and the load balancers seconds after the script deleted them, and the script's last check stopped at
+`STILL THERE (PersistentVolumeClaim): persistentvolumeclaim/data-redis-0` (that claim was only a minute old). With an OLDER copy of the script, run this first:
+```bash
+kubectl -n argocd patch application root --type merge -p '{"spec":{"syncPolicy":null}}'
+```
+and then the script again. It is safe to repeat.
 
 Then Terraform:
 
