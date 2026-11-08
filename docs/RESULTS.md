@@ -216,5 +216,9 @@ Drills (100 req/s warm redirects from the in-cluster k6 Job; scripts in `infra/k
 6. The operator's public IP alternates between two addresses; both are in `admin_cidrs` and in the ALBs' `inbound-cidrs`.
 7. A harmless perpetual plan difference on the RDS parameter group (`apply_method`).
 
+**Screenshots** (`docs/screenshots/`, taken on 2026-11-08 while the cluster was up): `argocd-linkforge.png` (Argo CD: the `linkforge` application Synced and Healthy, 14 resources, 0 out of sync, two ALBs, two Ingresses),
+`aws-eks.png` (EKS console: cluster `linkforge`, Active, Kubernetes 1.36, 0 cluster health issues; account ID hidden), `app-analytics.png` (the analytics page of a short link on the AWS deployment: 2 clicks).
+No Grafana screenshot exists: there is no Prometheus or Grafana on EKS.
+
 **NOT done / NOT verified:** server-side latency or Prometheus numbers on EKS; the ALB hop and a client on the internet; Postgres row counts against clicks sent; EBS reattach on another node; the default-limits rate limiter test on EKS; a bad API image tag; Slack; the real cost (read it from Billing the day after: the figure is added when known).
 
