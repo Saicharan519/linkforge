@@ -67,6 +67,22 @@ module "eks" {
     }
   }
 
+  # The module already lets the control plane reach the nodes on 443, 10250 (kubelet) and the common webhook
+  # ports, but NOT on 8080. `kubeseal` fetches the Sealed Secrets certificate THROUGH the Kubernetes API
+  # ("service proxy"): the control plane then connects to the controller pod on port 8080 and, without this
+  # rule, times out (found on the first real run: "dial tcp 10.20.x.x:8080: connect: connection timed out").
+  # Only the control plane's security group is allowed, only that one port, only to the nodes.
+  node_security_group_additional_rules = {
+    ingress_cluster_8080_sealed_secrets = {
+      description                   = "Control plane to the Sealed Secrets controller (API service proxy used by kubeseal)"
+      protocol                      = "tcp"
+      from_port                     = 8080
+      to_port                       = 8080
+      type                          = "ingress"
+      source_cluster_security_group = true
+    }
+  }
+
   eks_managed_node_groups = {
     main = {
       instance_types = var.node_instance_types
