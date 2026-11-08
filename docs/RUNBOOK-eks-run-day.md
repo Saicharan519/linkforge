@@ -117,20 +117,29 @@ cat ~/iam-policy-p9.mine.json
 
 Select the whole text with the mouse and copy it (right click or Ctrl+Shift+C in the terminal).
 
-### 2c. Put it in the console
-1. Console search box: type `IAM`, open **IAM**.
-2. Left menu: **Users**. Click **linkforge-terraform**.
-3. Tab **Permissions**. You will see the existing policy (the S3 state one). Leave it.
-4. Click **Add permissions**, then **Create inline policy**.
-5. Click the **JSON** button (not "Visual").
-6. Delete everything in the box. Paste the copied text.
-7. Click **Next**. Name it `linkforge-p9`. Click **Create policy**.
+### 2c. Create it as a MANAGED policy and attach it (browser)
 
-(If the existing S3 policy has a similar permission, that is fine, the new policy contains the state bucket permission too.)
+**Why managed and not inline:** AWS allows only 2048 characters in total for all *inline* policies of one user, and the user already has the small
+S3 state policy inline. This policy is bigger, so the console answers "Your policy exceeds the non-whitespace character limit of 2048". A managed
+policy may be up to 6144 characters. (This happened on the first real run.)
+
+1. Console search box: type `IAM`, open **IAM**.
+2. Left menu: **Policies** (not Users). Click **Create policy**.
+3. Click the **JSON** button (not "Visual").
+4. Delete everything in the box. Paste the copied text.
+5. Click **Next**. In **Policy name** type `linkforge-p9`. Click **Create policy**. Expected: a green "Policy linkforge-p9 created".
+6. Left menu: **Users**. Click **linkforge-terraform**. Tab **Permissions**.
+7. Click **Add permissions**, then **Attach policies directly**. In the search box type `linkforge-p9` and tick its checkbox.
+8. Click **Next**, then **Add permissions**.
+
+The existing S3 inline policy stays; the new policy also contains the state bucket permission, which is harmless.
+
+If it says the policy exceeds 6144 characters: take a screenshot, Claude splits it into two policies. If it says you are not authorized to create
+policies: the account's own restriction is the cause, take a screenshot and stop.
 
 ### 2d. A second small policy for the read-only checks of Step 3
-The big policy does not include the quota service. Do the same clicks again (**Add permissions, Create inline policy, JSON**) with
-this text, name it `linkforge-preflight`:
+The big policy does not include the quota service. Create another **managed** policy exactly as in 2c (**Policies, Create policy, JSON**) with
+this text, name it `linkforge-preflight`, and attach it to the user the same way (steps 6 to 8):
 
 ```json
 {
@@ -138,17 +147,18 @@ this text, name it `linkforge-preflight`:
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": ["servicequotas:GetServiceQuota", "servicequotas:ListServiceQuotas", "sts:GetCallerIdentity"],
+      "Action": ["servicequotas:GetServiceQuota", "servicequotas:ListServiceQuotas"],
       "Resource": "*"
     }
   ]
 }
 ```
 
-**Expected:** the Permissions tab now lists three policies.
+**Expected:** the Permissions tab now lists three policies: the old S3 inline one, `linkforge-p9` and `linkforge-preflight`
+(the last two as "Customer managed").
 
 **If it looks different:** an error "policy contains invalid JSON" means the paste lost a character. Paste it again. An error that mentions
-an explicit deny: take a screenshot and paste it in the chat.
+an explicit deny: take a screenshot and paste it in the chat. (`sts get-caller-identity` in Step 3 needs no permission.)
 
 **Important:** the account's own AWS-managed policy may still deny things. An explicit deny always wins. Only the first Terraform run
 shows this. That is why we apply in stages.
@@ -571,8 +581,9 @@ Open each service and check the list is empty of linkforge items (your own `orde
 Anything left with the tag `Project = linkforge`: delete it by hand and tell Claude.
 
 ### Credentials and costs
-1. IAM, Users, `linkforge-terraform`, tab **Security credentials**: **Deactivate** the access key (or delete it) when all AWS work is finished. Remove the
-   `linkforge-p9` and `linkforge-preflight` inline policies if you will not do another run.
+1. IAM, Users, `linkforge-terraform`, tab **Security credentials**: **Deactivate** the access key (or delete it) when all AWS work is finished. If you will not do another run,
+   remove the two managed policies: IAM, Users, `linkforge-terraform`, Permissions: tick `linkforge-p9` and `linkforge-preflight`, **Remove**; then IAM,
+   **Policies**, search `linkforge`, select each, **Actions, Delete**.
 2. Delete your private policy copy:
 
 ```bash

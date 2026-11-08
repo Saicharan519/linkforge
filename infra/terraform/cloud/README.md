@@ -28,7 +28,8 @@ object, the SealedSecret with the database URL, a Route53 zone, a domain.
 ## Before the first apply (read-only checks and permissions)
 
 1. **Budget alert works and you know your credit balance** (D3: expires 2027-04-28; EKS bills from the minute the cluster exists).
-2. **Permissions.** `linkforge-terraform` has only the S3 state policy (bootstrap). Replace it with `iam-policy-p9.json` (put your account
+2. **Permissions.** `linkforge-terraform` has only the S3 state policy (bootstrap). Add `iam-policy-p9.json` as a **customer managed policy** attached to the user (inline policies are capped at 2048 characters in total per user and this file exceeds it;
+   managed ones allow 6144) (put your account
    id where it says `<ACCOUNT_ID>`; drop the last statement if you stay in HTTP mode). It is scoped: EC2/EKS/RDS only in `ap-southeast-2`, IAM
    only for roles, policies and instance profiles named `linkforge-*`, `AttachRolePolicy` only for the managed policies this stack uses.
    Narrow it again after `terraform destroy`. **It may still not be enough or may be overridden**: the account's AWS-managed policy (D76) can
