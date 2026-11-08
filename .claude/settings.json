@@ -52,6 +52,7 @@
       "Bash(*eks-set-hosts.sh*)",
       "Bash(*eks-verify.sh*)",
       "Bash(*eks-teardown.sh*)",
+      "Bash(*eks-fix-webhook-ca.sh*)",
       "Bash(terraform output*)",
       "Bash(terraform show*)",
       "Bash(terraform state *)",

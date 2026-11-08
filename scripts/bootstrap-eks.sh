@@ -11,6 +11,8 @@
 #   3 teaches Argo CD to judge the health of `Application` objects, so waves between child apps are enforced
 #   4 applies the EKS root Application (argocd/eks/root.yaml), the one manual apply; everything else follows from git
 #   5 waits for the four platform apps (wave -3): sealed-secrets, eks-storage, metrics-server, aws-load-balancer-controller
+#   6 makes the load balancer controller's webhooks trust the certificate it serves (eks-fix-webhook-ca.sh, D90): without
+#     it the first Ingress can be rejected with "x509: certificate signed by unknown authority"
 #
 # It does NOT deploy LinkForge: the `linkforge` Application waits in argocd/eks/pending/ until the secrets are sealed
 # against THIS cluster's key (scripts/eks-seal-and-enable.sh). Unlike kind there is no key to restore: the EKS cluster
@@ -27,12 +29,12 @@ WAIT_SECONDS="${WAIT_SECONDS:-900}"
 for tool in kubectl curl sha256sum; do command -v "$tool" > /dev/null || die "missing tool: $tool"; done
 [ -f "$GITOPS/argocd/eks/root.yaml" ] || die "gitops repo not found at $GITOPS (set GITOPS_DIR)"
 
-step "1/5 is kubectl pointed at the EKS cluster?"
+step "1/6 is kubectl pointed at the EKS cluster?"
 require_eks_cluster
 ek get nodes -o wide
 ek wait --for=condition=Ready node --all --timeout=300s
 
-step "2/5 Argo CD v3.6.1 (commit ${ARGO_COMMIT:0:7}, sha256 checked)"
+step "2/6 Argo CD v3.6.1 (commit ${ARGO_COMMIT:0:7}, sha256 checked)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 curl -fsSL --retry 5 --retry-all-errors -o "$TMP/argocd-install.yaml" \
@@ -45,14 +47,14 @@ ek -n argocd rollout status statefulset/argocd-application-controller --timeout=
 # three components this project does not use (single sign-on, chat notifications, ApplicationSets): fewer pods
 ek -n argocd scale deploy argocd-dex-server argocd-notifications-controller argocd-applicationset-controller --replicas=0 > /dev/null
 
-step "3/5 Argo health check for Application resources"
+step "3/6 Argo health check for Application resources"
 ek apply --server-side --force-conflicts -f "$GITOPS/argocd/bootstrap/argocd-cm-health.yaml" > /dev/null
 echo "applied (the root now waits for each child Application to be Healthy)"
 
-step "4/5 root Application (the one manual apply)"
+step "4/6 root Application (the one manual apply)"
 ek apply -f "$GITOPS/argocd/eks/root.yaml"
 
-step "5/5 waiting for the platform apps (up to $((WAIT_SECONDS / 60)) minutes)"
+step "5/6 waiting for the platform apps (up to $((WAIT_SECONDS / 60)) minutes)"
 deadline=$((SECONDS + WAIT_SECONDS))
 while :; do
   all_ok=1
@@ -73,6 +75,9 @@ while :; do
   fi
   sleep 15
 done
+
+step "6/6 webhook certificate authority of the load balancer controller"
+"$(dirname "${BASH_SOURCE[0]}")/eks-fix-webhook-ca.sh"
 
 echo
 echo "Done. Platform is up: Sealed Secrets, gp3 StorageClass, metrics-server, AWS Load Balancer Controller."

@@ -8,6 +8,9 @@
 # controllers INSIDE the cluster, not by Terraform. `terraform destroy` knows nothing about them: run it first and the
 # cluster disappears with those AWS resources still there, billing, and their network interfaces block the deletion of
 # the VPC. So, in this order:
+#   0 switch off the auto-sync of the Argo CD `root` Application. Found on the first real teardown (D90): the root has the
+#     `linkforge` Application in git and self-heals, so it re-created the Application, its namespace, the Redis claim and
+#     the ALBs seconds after they were deleted, and the final check stopped at "STILL THERE". (This is step 2/5 below.)
 #   1 delete the `linkforge` Application (cascade): its two Ingresses go; the load balancer controller keeps a finalizer on
 #     each Ingress and removes it only after the ALB is deleted, so "Ingress gone" means "ALB gone"
 #   2 delete the namespace `linkforge`: this removes the Redis PersistentVolumeClaim (Argo's cascade does not: StatefulSet
@@ -29,7 +32,7 @@ for arg in "$@"; do
 done
 TIMEOUT="${TEARDOWN_TIMEOUT:-600s}"
 
-step "1/4 is kubectl pointed at the EKS cluster?"
+step "1/5 is kubectl pointed at the EKS cluster?"
 require_eks_cluster
 host="$(ek config view --minify -o jsonpath='{.clusters[0].cluster.server}' | sed 's|^https://||; s|\..*||')"
 if [ "$ASSUME_YES" = 0 ]; then
@@ -38,7 +41,14 @@ if [ "$ASSUME_YES" = 0 ]; then
   [ "$answer" = "$host" ] || die "not confirmed; nothing was deleted"
 fi
 
-step "2/4 delete the linkforge Application (cascade: Ingresses, so ALBs)"
+step "2/5 switch off auto-sync of the root Application (otherwise it re-creates everything we delete next)"
+if ek -n argocd get application root > /dev/null 2>&1; then
+  ek -n argocd patch application root --type merge -p '{"spec":{"syncPolicy":null}}'
+else
+  echo "no root Application (already gone, or never installed)"
+fi
+
+step "3/5 delete the linkforge Application (cascade: Ingresses, so ALBs)"
 if ek -n argocd get application linkforge > /dev/null 2>&1; then
   ek -n argocd delete application linkforge --wait=true --timeout="$TIMEOUT"
 else
@@ -49,15 +59,18 @@ ek -n linkforge wait --for=delete ingress --all --timeout="$TIMEOUT" 2> /dev/nul
 left="$(ek -n linkforge get ingress -o name 2> /dev/null || true)"
 [ -z "$left" ] || die "Ingresses still exist ($left): the ALBs may not be deleted yet. Look at the load balancer controller logs, do NOT run terraform destroy yet."
 
-step "3/4 delete the namespace linkforge (Redis claim and EBS volume)"
+step "4/5 delete the namespace linkforge (Redis claim and EBS volume)"
 if ek get namespace linkforge > /dev/null 2>&1; then
   ek delete namespace linkforge --wait=true --timeout="$TIMEOUT"
 else
   echo "no namespace linkforge"
 fi
 
-step "4/4 verify nothing that costs money is left inside the cluster"
+step "5/5 verify nothing that costs money is left inside the cluster"
 problems=0
+# the root was switched off above; if the Application or the namespace is back anyway, something re-created them (stop: the ALBs may be back too)
+if ek -n argocd get application linkforge > /dev/null 2>&1; then echo "STILL THERE (the Application linkforge was re-created)"; problems=1; fi
+if ek get namespace linkforge > /dev/null 2>&1; then echo "STILL THERE (the namespace linkforge was re-created)"; problems=1; fi
 ingresses="$(ek get ingress -A -o name 2> /dev/null || true)"
 if [ -n "$ingresses" ]; then echo "STILL THERE (Ingress): $ingresses"; problems=1; fi
 lbs="$(ek get svc -A -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' 2> /dev/null || true)"

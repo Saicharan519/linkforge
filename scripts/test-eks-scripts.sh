@@ -33,10 +33,13 @@ shift 2
 all="$*"
 echo "$all" >> "${KLOG:-/dev/null}"
 case "$all" in
-  "-n argocd get application linkforge") exit 0 ;;
+  "-n argocd get application root") [ -n "${FAKE_NO_ROOT:-}" ] && exit 1; exit 0 ;;
+  "-n argocd get application linkforge") [ -e "$TSTATE/app-deleted" ] && [ -z "${FAKE_APP_RECREATED:-}" ] && exit 1; exit 0 ;;
+  "-n argocd delete application linkforge"*) touch "$TSTATE/app-deleted"; echo "application deleted" ;;
   "-n linkforge wait --for=delete ingress --all"*) exit 0 ;;
   "-n linkforge get ingress -o name") printf '%s' "${FAKE_INGRESS_LEFT:-}" ;;
-  "get namespace linkforge") exit 0 ;;
+  "get namespace linkforge") [ -e "$TSTATE/ns-deleted" ] && [ -z "${FAKE_NS_RECREATED:-}" ] && exit 1; exit 0 ;;
+  "delete namespace linkforge"*) touch "$TSTATE/ns-deleted"; echo "namespace deleted" ;;
   "get ingress -A -o name") printf '%s' "${FAKE_INGRESS_LEFT:-}" ;;
   "get svc -A -o jsonpath="*) printf '%s' "${FAKE_LB_LEFT:-}" ;;
   "get pvc -A -o name") printf '%s' "${FAKE_PVC_LEFT:-}" ;;
@@ -46,6 +49,11 @@ case "$all" in
   "get nodes -o jsonpath={.items[0].spec.providerID}") printf '%s' "${FAKE_PROVIDER:-aws:///ap-southeast-2a/i-0abc}" ;;
   "-n linkforge get ingress app -o jsonpath={.status.loadBalancer.ingress[0].hostname}") printf '%s' "${FAKE_APP_DNS:-}" ;;
   "-n linkforge get ingress go -o jsonpath={.status.loadBalancer.ingress[0].hostname}") printf '%s' "${FAKE_GO_DNS:-}" ;;
+  "-n kube-system get secret aws-load-balancer-tls -o jsonpath="*) printf '%s' "${FAKE_SECRET_CA-Q0EtT0Y=}" ;;
+  "get validatingwebhookconfiguration aws-load-balancer-webhook -o jsonpath={.webhooks[*].name}") printf '%s' "${FAKE_VWC_NAMES-vingress.elbv2.k8s.aws vtgb.elbv2.k8s.aws vsvc.elbv2.k8s.aws}" ;;
+  "get mutatingwebhookconfiguration aws-load-balancer-webhook -o jsonpath={.webhooks[*].name}") printf '%s' "${FAKE_MWC_NAMES-mpod.elbv2.k8s.aws mtgb.elbv2.k8s.aws}" ;;
+  "get validatingwebhookconfiguration aws-load-balancer-webhook -o jsonpath={.webhooks["*"].clientConfig.caBundle}") printf '%s' "${FAKE_LIVE_CA-Q0EtT0Y=}" ;;
+  "get mutatingwebhookconfiguration aws-load-balancer-webhook -o jsonpath={.webhooks["*"].clientConfig.caBundle}") printf '%s' "${FAKE_LIVE_CA-Q0EtT0Y=}" ;;
   *) echo "(fake kubectl) $all" ;;
 esac
 EOF
@@ -74,6 +82,7 @@ EOF
 chmod +x "$T/shim"/*
 export PATH="$T/shim:$PATH"
 export SEAL_LOG="$T/seal.log"
+export TSTATE="$T"
 export KUBECONFIG="$T/eks.yaml"
 : > "$KUBECONFIG"
 
@@ -153,8 +162,42 @@ FAKE_PVC_LEFT="persistentvolumeclaim/data-redis-0" expect_fail "refuses when a v
 FAKE_PV_LEFT="persistentvolume/pvc-123" expect_fail "refuses when a volume is left" "PersistentVolume" "$HERE/eks-teardown.sh" --yes
 FAKE_LB_LEFT="default/some-lb" expect_fail "refuses when a LoadBalancer Service is left" "LoadBalancer" "$HERE/eks-teardown.sh" --yes
 
+echo "== eks-fix-webhook-ca.sh"
+export KLOG="$T/kubectl-ca.log"
+: > "$KLOG"
+"$HERE/eks-fix-webhook-ca.sh" > "$T/ca-match.log" 2>&1 && ok "runs on a cluster whose webhooks already trust the CA" || bad "fix-webhook-ca failed: $(tail -3 "$T/ca-match.log")"
+grep -q "^patch " "$KLOG" && bad "it patched webhooks that already matched (not idempotent)" || ok "changes nothing when every caBundle already matches the Secret"
+grep -q "nothing to do" "$T/ca-match.log" && ok "says so" || bad "no 'nothing to do' message"
+: > "$KLOG"
+FAKE_LIVE_CA="b3RoZXI=" "$HERE/eks-fix-webhook-ca.sh" > "$T/ca-mismatch.log" 2>&1 && ok "runs on a cluster whose webhooks trust another CA" || bad "fix-webhook-ca failed on a mismatch: $(tail -3 "$T/ca-mismatch.log")"
+[ "$(grep -c "^patch validatingwebhookconfiguration" "$KLOG")" = 3 ] && [ "$(grep -c "^patch mutatingwebhookconfiguration" "$KLOG")" = 2 ] && ok "patches every webhook of both configurations (3 + 2)" || bad "wrong number of patches: $(grep -c '^patch ' "$KLOG")"
+grep -q '"value":"Q0EtT0Y="' "$KLOG" && ok "the patch carries the CA of the Secret" || bad "the patch does not carry the Secret's CA"
+: > "$KLOG"
+FAKE_SECRET_CA="" expect_fail "refuses when the Secret has no ca.crt" "was not found in kube-system" "$HERE/eks-fix-webhook-ca.sh"
+FAKE_VWC_NAMES="" expect_fail "refuses when the webhook configuration is empty" "has no webhooks" "$HERE/eks-fix-webhook-ca.sh"
+grep -q "^patch " "$KLOG" && bad "it patched although a precondition failed" || ok "patches nothing when a precondition fails"
+FAKE_SERVER="https://127.0.0.1:6443" expect_fail "refuses a non-EKS target" "not an EKS endpoint" "$HERE/eks-fix-webhook-ca.sh"
+
+echo "== eks-teardown.sh: the root Application must not re-create what is deleted (D90)"
+rm -f "$T/app-deleted" "$T/ns-deleted"
+export KLOG="$T/kubectl-root.log"
+: > "$KLOG"
+"$HERE/eks-teardown.sh" --yes > "$T/teardown-root.log" 2>&1 && ok "runs to the end with a root Application present" || bad "teardown failed: $(tail -3 "$T/teardown-root.log")"
+root_line="$(grep -n "patch application root" "$KLOG" | head -1 | cut -d: -f1)"
+del_line="$(grep -n "delete application linkforge" "$KLOG" | head -1 | cut -d: -f1)"
+{ [ -n "$root_line" ] && [ -n "$del_line" ] && [ "$root_line" -lt "$del_line" ]; } && ok "switches the root's auto-sync off BEFORE deleting the Application (root=$root_line app=$del_line)" || bad "root not patched before the delete (root=$root_line app=$del_line)"
+grep -q '"syncPolicy":null' "$KLOG" && ok "the patch removes the syncPolicy of the root" || bad "unexpected root patch"
+rm -f "$T/app-deleted" "$T/ns-deleted"
+: > "$KLOG"
+FAKE_NO_ROOT=1 "$HERE/eks-teardown.sh" --yes > "$T/teardown-noroot.log" 2>&1 && ok "runs when there is no root Application" || bad "teardown failed without a root: $(tail -3 "$T/teardown-noroot.log")"
+grep -q "patch application root" "$KLOG" && bad "it patched a root that does not exist" || ok "patches nothing when there is no root"
+rm -f "$T/app-deleted" "$T/ns-deleted"
+FAKE_APP_RECREATED=1 expect_fail "stops when the Application was re-created" "was re-created" "$HERE/eks-teardown.sh" --yes
+rm -f "$T/app-deleted" "$T/ns-deleted"
+FAKE_NS_RECREATED=1 expect_fail "stops when the namespace was re-created" "was re-created" "$HERE/eks-teardown.sh" --yes
+
 echo "== syntax"
-for f in eks-common.sh bootstrap-eks.sh eks-seal-and-enable.sh eks-set-hosts.sh eks-verify.sh eks-teardown.sh test-eks-scripts.sh; do
+for f in eks-common.sh bootstrap-eks.sh eks-seal-and-enable.sh eks-set-hosts.sh eks-verify.sh eks-teardown.sh eks-fix-webhook-ca.sh test-eks-scripts.sh; do
   bash -n "$HERE/$f" && ok "bash -n $f" || bad "syntax error in $f"
 done
 if command -v shellcheck > /dev/null; then
