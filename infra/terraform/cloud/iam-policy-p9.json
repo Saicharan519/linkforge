@@ -109,6 +109,12 @@
       }
     },
     {
+      "Sid": "ReadTheRecommendedEksNodeImage",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": "arn:aws:ssm:ap-southeast-2::parameter/aws/service/eks/optimized-ami/*"
+    },
+    {
       "Sid": "OptionalDomainModeAcmAndRoute53",
       "Effect": "Allow",
       "Action": [
