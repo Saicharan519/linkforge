@@ -220,5 +220,7 @@ Drills (100 req/s warm redirects from the in-cluster k6 Job; scripts in `infra/k
 `aws-eks.png` (EKS console: cluster `linkforge`, Active, Kubernetes 1.36, 0 cluster health issues; account ID hidden), `app-analytics.png` (the analytics page of a short link on the AWS deployment: 2 clicks).
 No Grafana screenshot exists: there is no Prometheus or Grafana on EKS.
 
-**NOT done / NOT verified:** server-side latency or Prometheus numbers on EKS; the ALB hop and a client on the internet; Postgres row counts against clicks sent; EBS reattach on another node; the default-limits rate limiter test on EKS; a bad API image tag; Slack; the real cost (read it from Billing the day after: the figure is added when known).
+**NOT done / NOT verified:** server-side latency or Prometheus numbers on EKS; the ALB hop and a client on the internet; Postgres row counts against clicks sent; EBS reattach on another node; the default-limits rate limiter test on EKS; a bad API image tag; Slack.
+
+**Running cost if the stack is left on (an ESTIMATE, not a measurement):** from public list prices as remembered (not looked up) for Sydney: EKS control plane about $0.10 per hour, 2 x `m7i-flex.large` about $0.2 per hour, NAT gateway about $0.06 per hour plus data, two ALBs about $0.05 per hour plus load, RDS `db.t4g.micro` with storage about $0.04 per hour, small amounts for the public IPv4 addresses and the EBS volume: roughly $0.5 per hour, **about $12 per day and about $350 to $380 per month**. The stack is destroyed after use (`docs/RUNBOOK-eks-run-day.md`, Step 12), so the real spend is a small fraction of that.
 
